@@ -1,0 +1,7 @@
+vendor
+*.csv
+*.parms
+*.log
+*-resources.*.json
+*-pod-*.yaml
+*.zip
