@@ -1,4 +1,5 @@
 vendor
+dockerbuild
 *.csv
 *.parms
 *.log
