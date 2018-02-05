@@ -85,12 +85,13 @@ func (c *Controller) getObjectData(key string, addIfMissing, deleteIfPresent boo
 	return od
 }
 
-func NewController(queue workqueue.RateLimitingInterface, informer cache.Controller, lister corev1listers.ConfigMapLister) *Controller {
+func NewController(queue workqueue.RateLimitingInterface, informer cache.Controller, lister corev1listers.ConfigMapLister, csvFilename string) *Controller {
 	return &Controller{
-		informer: informer,
-		queue:    queue,
-		lister:   lister,
-		objects:  make(map[string]*ObjectData),
+		informer:    informer,
+		queue:       queue,
+		lister:      lister,
+		csvFilename: csvFilename,
+		objects:     make(map[string]*ObjectData),
 	}
 }
 
@@ -256,7 +257,7 @@ func main() {
 	// create the workqueue
 	queue := workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
 
-	controller := NewController(queue, informer, lister)
+	controller := NewController(queue, informer, lister, dataFilename)
 
 	// Bind the workqueue to a cache with the help of an informer. This way we make sure that
 	// whenever the cache is updated, the object key is added to the workqueue.

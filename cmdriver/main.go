@@ -89,7 +89,8 @@ func main() {
 	/* connect to the API server */
 	config, err := getClientConfig(*kubeconfigPath)
 	if err != nil {
-		panic(err)
+		glog.Errorf("Unable to get kube client config: %s", err)
+		os.Exit(20)
 	}
 	config.RateLimiter = flowcontrol.NewFakeAlwaysRateLimiter()
 
@@ -140,9 +141,9 @@ func RunObjLifeCycle(clientset *kubeclient.Clientset, csvFile *os.File, objname 
 	/* create the object */
 	obj := &kubecorev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        objname,
-			Namespace:   namespace,
-			Annotations: map[string]string{"purpose": "scaletest"},
+			Name:      objname,
+			Namespace: namespace,
+			Labels:    map[string]string{"purpose": "scaletest"},
 		},
 		Data: map[string]string{"foo": "bar"},
 	}
@@ -167,6 +168,9 @@ func getClientConfig(kubeconfig string) (restConfig *rest.Config, err error) {
 		restConfig, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
 	} else {
 		restConfig, err = rest.InClusterConfig()
+	}
+	if err != nil {
+		return
 	}
 	restConfig.UserAgent = "scaletest driver"
 	glog.V(4).Infof("*rest.Config = %#v", *restConfig)

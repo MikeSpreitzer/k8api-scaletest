@@ -8,6 +8,6 @@ ${LOGGER}: main.go hostaddr.go
 	mkdir -p dockerbuild
 	GOOS=linux GOARCH=amd64 go build -o ${LOGGER}
 
-image: ${LOGGER} Dockerfile
+publish: ${LOGGER} Dockerfile
 	cp Dockerfile dockerbuild/
 	cd dockerbuild && docker build -t ${DOCKERREG}/object-logger . && docker push ${DOCKERREG}/object-logger
