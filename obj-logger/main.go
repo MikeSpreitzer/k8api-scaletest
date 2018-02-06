@@ -149,13 +149,17 @@ func (c *Controller) logDequeue(key string) error {
 	}()
 
 	// Log it
-	_, err = c.csvFile.Write([]byte(fmt.Sprintf("%s,%s,%q,%s,%d,%d,%d,%s,%s\n",
-		formatTime(now), op, key, formatTimeNoMillis(creationTime),
-		oqd.queuedAdds, oqd.queuedUpdates, oqd.queuedDeletes,
-		formatTime(oqd.firstEnqueue), formatTime(oqd.lastEnqueue),
-	)))
-	if err != nil {
-		runtime.HandleError(fmt.Errorf("Error writing to CSV file named %q: %+v", c.csvFilename, err))
+	if c.csvFile != nil {
+		_, err = c.csvFile.Write([]byte(fmt.Sprintf("%s,%s,%q,%s,%d,%d,%d,%s,%s\n",
+			formatTime(now), op, key, formatTimeNoMillis(creationTime),
+			oqd.queuedAdds, oqd.queuedUpdates, oqd.queuedDeletes,
+			formatTime(oqd.firstEnqueue), formatTime(oqd.lastEnqueue),
+		)))
+		if err != nil {
+			runtime.HandleError(fmt.Errorf("Error writing to CSV file named %q: %+v", c.csvFilename, err))
+		}
+	} else {
+		glog.V(4).Infof("c.csvFile == nil\n")
 	}
 
 	return nil

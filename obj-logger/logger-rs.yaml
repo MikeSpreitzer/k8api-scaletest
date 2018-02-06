@@ -1,0 +1,17 @@
+apiVersion: apps/v1beta2
+kind: ReplicaSet
+metadata:
+  name: object-logger
+  namespace: scaletest
+spec:
+  selector:
+    matchLabels:
+      app: object-logger
+  template:
+    metadata:
+      labels:
+        app: object-logger
+    spec:
+      containers:
+      - image: mspreitz/object-logger:latest
+        name: logger
