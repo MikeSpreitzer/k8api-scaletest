@@ -1,0 +1,17 @@
+apiVersion: apps/v1beta2
+kind: ReplicaSet
+metadata:
+  name: flunder-watch
+  namespace: scaletest
+spec:
+  selector:
+    matchLabels:
+      app: flunder-watch
+  template:
+    metadata:
+      labels:
+        app: flunder-watch
+    spec:
+      containers:
+      - image: mspreitz/flunder-watch:latest
+        name: watch
