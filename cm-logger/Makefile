@@ -1,5 +1,5 @@
 DOCKERREG=localhost:5000
-LOGGER=dockerbuild/obj-logger
+LOGGER=dockerbuild/cm-logger
 
 .PHONY: build
 build: ${LOGGER}
@@ -10,4 +10,4 @@ ${LOGGER}: main.go hostaddr.go
 
 publish: ${LOGGER} Dockerfile
 	cp Dockerfile dockerbuild/
-	cd dockerbuild && docker build -t ${DOCKERREG}/object-logger . && docker push ${DOCKERREG}/object-logger
+	cd dockerbuild && docker build -t ${DOCKERREG}/cm-logger . && docker push ${DOCKERREG}/cm-logger
