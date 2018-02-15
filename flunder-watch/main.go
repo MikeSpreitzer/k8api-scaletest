@@ -19,6 +19,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"hash/crc64"
 	"math/rand"
 	"os"
 	"time"
@@ -43,8 +44,6 @@ func main() {
 	flag.Set("logtostderr", "true")
 	flag.Parse()
 
-	rand.Seed(time.Now().UnixNano())
-
 	// creates the connection
 	config, err := clientcmd.BuildConfigFromFlags(master, kubeconfig)
 	if err != nil {
@@ -52,6 +51,11 @@ func main() {
 	}
 	myAddr := GetHostAddr()
 	glog.Infof("Using %s as my host address\n", myAddr)
+	crcTable := crc64.MakeTable(crc64.ISO)
+	crc := int64(crc64.Checksum(([]byte)(myAddr), crcTable))
+	rand.Seed(time.Now().UnixNano() + crc)
+	rand.Float64()
+	rand.Float64()
 	config.UserAgent = fmt.Sprintf("flunder-watcher@%s", myAddr)
 
 	if useProtobuf {
@@ -67,7 +71,7 @@ func main() {
 	flunderIfc := clientset.WardleV1alpha1().Flunders(namespace)
 
 	for {
-		var timeout int64 = int64(600 + rand.Intn(600))
+		var timeout int64 = int64(1200 + rand.Intn(1200))
 		glog.Infof("Watching namespace %q with myAddr=%q, timeout=%d\n", namespace, myAddr, timeout)
 		watch, err := flunderIfc.Watch(metav1.ListOptions{
 			ResourceVersion: "1",
