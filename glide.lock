@@ -1,5 +1,5 @@
-hash: 99600b8fe9beb62b222fc0ad400682582e6b944c721813743f9155bfd38be083
-updated: 2018-02-02T17:00:43.46463-05:00
+hash: 12a03a5494f8922a46e5d9449a48b4507aaf6f9a1957f5fe06395e18040b2cbe
+updated: 2018-02-14T23:39:10.36926-05:00
 imports:
 - name: github.com/davecgh/go-spew
   version: 782f4967f2dc4564575ca782fe2d04090b5faca8
@@ -84,10 +84,13 @@ imports:
   version: 1c05540f6879653db88113bc4a2b70aec4bd491f
   subpackages:
   - context
+  - html
+  - html/atom
   - http2
   - http2/hpack
   - idna
   - lex/httplex
+  - websocket
 - name: golang.org/x/sys
   version: 7ddbeae9ae08c6a06a59597f0c9edbc5ff2444ce
   subpackages:
@@ -288,4 +291,12 @@ imports:
   version: 868f2f29720b192240e18284659231b440f9cda5
   subpackages:
   - pkg/common
+- name: k8s.io/sample-apiserver
+  version: 84665293ac6f48d89cf8d5c59dee02bc326d2031
+  subpackages:
+  - pkg/apis/wardle
+  - pkg/apis/wardle/v1alpha1
+  - pkg/client/clientset/versioned
+  - pkg/client/clientset/versioned/scheme
+  - pkg/client/clientset/versioned/typed/wardle/v1alpha1
 testImports: []

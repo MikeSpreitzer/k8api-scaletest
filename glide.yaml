@@ -16,3 +16,5 @@ import:
   - rest
   - tools/clientcmd
   - util/flowcontrol
+- package: k8s.io/sample-apiserver
+  version: release-1.8

@@ -1,17 +1,17 @@
 apiVersion: apps/v1beta2
 kind: ReplicaSet
 metadata:
-  name: cm-logger
+  name: flunder-logger
   namespace: scaletest
 spec:
   selector:
     matchLabels:
-      app: cm-logger
+      app: flunder-logger
   template:
     metadata:
       labels:
-        app: cm-logger
+        app: flunder-logger
     spec:
       containers:
-      - image: mspreitz/cm-logger:latest
+      - image: mspreitz/flunder-logger:latest
         name: logger
