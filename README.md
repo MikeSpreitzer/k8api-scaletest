@@ -51,13 +51,15 @@ simple processes.
 For a simple process, just `cd` and `go build`.
 
 For a piece that supports containerization, there are three stages and
-a `Makefile` that handles the first two.  The `make` or `make build`
-command will build the executable.  Use `make publish` to create a
-Docker image and push it somewhere.  By default that is `$LOGNAME` at
-Dockerhub; you can `make publish DOCKERPFX=$reg/$ns` to push to
-`$reg/$ns` instead.  Finally, there is a YAML file that describes a
-Kubernetes ReplicaSet that runs the image that I built (you may want
-to edit it to run the image that you build).
+a `Makefile` that handles the first two.  To build the executable for
+your development machine, just `cd` and `go build`.  The `make` or
+`make build` command will build the executable for use in a container.
+Use `make publish` to create a Docker image and push it somewhere.  By
+default that somewhere is `$LOGNAME` at Dockerhub; you can `make
+publish DOCKERPFX=$reg/$ns` to push to `$reg/$ns` instead.  Finally,
+there is a YAML file that describes a Kubernetes ReplicaSet that runs
+the image that I built (you may want to edit it to run the image that
+you build).
 
 ### The Vendor Gotcha
 

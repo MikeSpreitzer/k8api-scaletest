@@ -50,13 +50,15 @@ func main() {
 		glog.Fatal(err)
 	}
 	myAddr := GetHostAddr()
-	glog.Infof("Using %s as my host address\n", myAddr)
+	now := time.Now()
+	birthmark := fmt.Sprintf("%02d%02d%02d", now.Hour(), now.Minute(), now.Second())
+	glog.Infof("Using %q as my host address, %q as my birthmark\n", myAddr, birthmark)
 	crcTable := crc64.MakeTable(crc64.ISO)
 	crc := int64(crc64.Checksum(([]byte)(myAddr), crcTable))
-	rand.Seed(time.Now().UnixNano() + crc)
+	rand.Seed(now.UnixNano() + crc)
 	rand.Float64()
 	rand.Float64()
-	config.UserAgent = fmt.Sprintf("flunder-watcher@%s", myAddr)
+	config.UserAgent = fmt.Sprintf("flunder-watcher@%s@%s", myAddr, birthmark)
 
 	if useProtobuf {
 		config.ContentType = "application/vnd.kubernetes.protobuf"
