@@ -71,15 +71,21 @@ func main() {
 	flunderIfc := clientset.WardleV1alpha1().Flunders(namespace)
 
 	for {
-		var timeout int64 = int64(1200 + rand.Intn(1200))
-		glog.Infof("Watching namespace %q with myAddr=%q, timeout=%d\n", namespace, myAddr, timeout)
+		objlist, err := flunderIfc.List(metav1.ListOptions{})
+		if err != nil {
+			glog.Errorf("List returned error %s\n", err)
+			os.Exit(10)
+		}
+		rv := objlist.ResourceVersion
+		var timeout int64 = int64(300 + rand.Intn(300))
+		glog.Infof("Watching namespace %q from ResourceVersion %q with myAddr=%q, timeout=%d\n", namespace, rv, myAddr, timeout)
 		watch, err := flunderIfc.Watch(metav1.ListOptions{
-			ResourceVersion: "1",
+			ResourceVersion: rv,
 			TimeoutSeconds:  &timeout,
 		})
 		if err != nil {
 			glog.Errorf("Watch returned error %s\n", err)
-			os.Exit(10)
+			os.Exit(12)
 		}
 		eventChan := watch.ResultChan()
 	EventLoop:
