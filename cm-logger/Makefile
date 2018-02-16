@@ -1,4 +1,10 @@
-DOCKERREG=localhost:5000
+
+# The following will put the built image in your Dockerhub namespace,
+# and assumes you have one and it equals your username.  In general,
+# set DOCKERPFX to identify a Docker $registry/$namespace.
+
+DOCKERPFX=$(LOGNAME)
+
 LOGGER=dockerbuild/cm-logger
 
 .PHONY: build
@@ -10,4 +16,4 @@ ${LOGGER}: main.go hostaddr.go
 
 publish: ${LOGGER} Dockerfile
 	cp Dockerfile dockerbuild/
-	cd dockerbuild && docker build -t ${DOCKERREG}/cm-logger . && docker push ${DOCKERREG}/cm-logger
+	cd dockerbuild && docker build -t ${DOCKERPFX}/cm-logger . && docker push ${DOCKERPFX}/cm-logger
