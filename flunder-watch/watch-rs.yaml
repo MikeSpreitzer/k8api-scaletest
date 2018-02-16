@@ -15,3 +15,6 @@ spec:
       containers:
       - image: mspreitz/flunder-watch:latest
         name: watch
+        command:
+        - /flunder-watch
+        - -v=9
