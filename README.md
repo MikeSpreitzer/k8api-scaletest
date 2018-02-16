@@ -59,7 +59,8 @@ default that somewhere is `$LOGNAME` at Dockerhub; you can `make
 publish DOCKERPFX=$reg/$ns` to push to `$reg/$ns` instead.  Finally,
 there is a YAML file that describes a Kubernetes ReplicaSet that runs
 the image that I built (you may want to edit it to run the image that
-you build).
+you build).  You will also need to `kubectl create namespace
+scaletest` before creating the ReplicaSet.
 
 ### The Vendor Gotcha
 
