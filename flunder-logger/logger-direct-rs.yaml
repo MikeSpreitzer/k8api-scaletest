@@ -1,0 +1,20 @@
+apiVersion: apps/v1beta2
+kind: ReplicaSet
+metadata:
+  name: flunder-logger
+  namespace: scaletest
+spec:
+  selector:
+    matchLabels:
+      app: flunder-logger
+  template:
+    metadata:
+      labels:
+        app: flunder-logger
+    spec:
+      containers:
+      - image: mspreitz/flunder-logger:latest
+        name: logger
+        args:
+        - -override-server=api.wardle.svc.cluster.local:443
+        - -insecure

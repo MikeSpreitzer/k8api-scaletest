@@ -32,8 +32,8 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/workqueue"
-	wardleinformers "k8s.io/sample-apiserver/pkg/client/informers/externalversions"
 	wardleclient "k8s.io/sample-apiserver/pkg/client/clientset/versioned"
+	wardleinformers "k8s.io/sample-apiserver/pkg/client/informers/externalversions"
 	wardlev1a1listers "k8s.io/sample-apiserver/pkg/client/listers/wardle/v1alpha1"
 )
 
@@ -223,12 +223,16 @@ func main() {
 	var useProtobuf bool
 	var dataFilename string
 	var numThreads int
+	var overrideServer string
+	var insecure bool
 
 	flag.StringVar(&kubeconfig, "kubeconfig", "", "absolute path to the kubeconfig file")
 	flag.StringVar(&master, "master", "", "master url")
 	flag.BoolVar(&useProtobuf, "useProtobuf", false, "indicates whether to encode objects with protobuf (as opposed to JSON)")
 	flag.StringVar(&dataFilename, "data-filname", "/tmp/obj-log.csv", "name of CSV file to create")
 	flag.IntVar(&numThreads, "threads", 1, "number of worker threads")
+	flag.StringVar(&overrideServer, "override-server", "", "server to use instead of the configured one (host string, host:port pair, or base URL)")
+	flag.BoolVar(&insecure, "insecure", false, "indicates whether to skip verifying the server's certificate")
 	flag.Set("logtostderr", "true")
 	flag.Parse()
 
@@ -237,8 +241,20 @@ func main() {
 	if err != nil {
 		glog.Fatal(err)
 	}
+	glog.V(3).Infof("Config=%#v\n", config)
+	if insecure {
+		glog.Infof("Skipping verification of server cert\n")
+		config.TLSClientConfig.Insecure = true
+		config.TLSClientConfig.CAFile = ""
+		config.TLSClientConfig.CAData = nil
+	}
+	if overrideServer != "" {
+		glog.Infof("Using server %q instead of %q\n", overrideServer, config.Host)
+		config.Host = overrideServer
+	}
 	myAddr := GetHostAddr()
 	glog.Infof("Using %s as my host address\n", myAddr)
+	glog.Infof("data-filname=%q, threads=%d\n", dataFilename, numThreads)
 	config.UserAgent = fmt.Sprintf("obj-logger@%s", myAddr)
 
 	if useProtobuf {
