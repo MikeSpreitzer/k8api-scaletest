@@ -63,9 +63,7 @@ you build).  You will also need to `kubectl create namespace
 scaletest` and `kubectl create -f authz.yaml` before creating the
 ReplicaSet.
 
-### The Vendor Gotcha
+### Dependencies
 
-`glide update` or `glide install` will create
-`vendor/k8s.io/sample-apiserver/vendor` --- which will, in turn, cause
-compilation errors.  Delete `vendor/k8s.io/sample-apiserver/vendor`
-before building.  There must be a better way!
+The dependencies are kept in `vendor` and managed by Glide.  Use the
+`-v` switch on `glide update` and `glide install`.

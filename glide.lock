@@ -1,5 +1,5 @@
 hash: 12a03a5494f8922a46e5d9449a48b4507aaf6f9a1957f5fe06395e18040b2cbe
-updated: 2018-02-14T23:39:10.36926-05:00
+updated: 2018-02-20T09:22:08.623971-05:00
 imports:
 - name: github.com/davecgh/go-spew
   version: 782f4967f2dc4564575ca782fe2d04090b5faca8
@@ -299,4 +299,9 @@ imports:
   - pkg/client/clientset/versioned
   - pkg/client/clientset/versioned/scheme
   - pkg/client/clientset/versioned/typed/wardle/v1alpha1
+  - pkg/client/informers/externalversions
+  - pkg/client/informers/externalversions/internalinterfaces
+  - pkg/client/informers/externalversions/wardle
+  - pkg/client/informers/externalversions/wardle/v1alpha1
+  - pkg/client/listers/wardle/v1alpha1
 testImports: []
