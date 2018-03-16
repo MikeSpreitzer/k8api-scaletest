@@ -18,3 +18,7 @@ import:
   - util/flowcontrol
 - package: k8s.io/sample-apiserver
   version: release-1.8
+- package: golang.org/x/net
+  version: release-branch.go1.9
+  subpackages:
+  - http2

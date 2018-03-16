@@ -1,5 +1,5 @@
-hash: 12a03a5494f8922a46e5d9449a48b4507aaf6f9a1957f5fe06395e18040b2cbe
-updated: 2018-02-20T09:22:08.623971-05:00
+hash: e6f8956fac82f9899fa05c348779fb5aea30c0f7088f013680d03fc72461f30f
+updated: 2018-03-16T15:48:00.728253-04:00
 imports:
 - name: github.com/davecgh/go-spew
   version: 782f4967f2dc4564575ca782fe2d04090b5faca8
@@ -81,16 +81,13 @@ imports:
   subpackages:
   - ssh/terminal
 - name: golang.org/x/net
-  version: 1c05540f6879653db88113bc4a2b70aec4bd491f
+  version: 44b7c21cbf19450f38b337eb6b6fe4f6496fb5b3
   subpackages:
   - context
-  - html
-  - html/atom
   - http2
   - http2/hpack
   - idna
   - lex/httplex
-  - websocket
 - name: golang.org/x/sys
   version: 7ddbeae9ae08c6a06a59597f0c9edbc5ff2444ce
   subpackages:
@@ -115,7 +112,7 @@ imports:
 - name: gopkg.in/yaml.v2
   version: 53feefa2559fb8dfa8d81baad31be332c97d6c77
 - name: k8s.io/api
-  version: 389dfa299845bcf399c16af89987e8775718ea48
+  version: 3c2a58f9923aeb5d27fa4d91249e45a1460ca3bd
   subpackages:
   - admissionregistration/v1alpha1
   - apps/v1beta1
@@ -142,7 +139,7 @@ imports:
   - storage/v1
   - storage/v1beta1
 - name: k8s.io/apimachinery
-  version: 4972c8e335e32ab65ba45bde0a99c6544c8a8e4c
+  version: ab7fc865fb0881d161f37adef3e5a67b89a18d05
   subpackages:
   - pkg/api/equality
   - pkg/api/errors
@@ -292,7 +289,7 @@ imports:
   subpackages:
   - pkg/common
 - name: k8s.io/sample-apiserver
-  version: 84665293ac6f48d89cf8d5c59dee02bc326d2031
+  version: 76ea3e9c8867261a731cc5559e7ee94f216527a1
   subpackages:
   - pkg/apis/wardle
   - pkg/apis/wardle/v1alpha1
