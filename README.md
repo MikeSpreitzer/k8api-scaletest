@@ -42,6 +42,40 @@ This package has a simple executable that loops over time-limited
 watches on `Flunder` objects.  This package also has a ReplicaSet of
 pods that run an image with that executable.
 
+### go_httperf
+
+This is a cousin of [iperf](https://en.wikipedia.org/wiki/Iperf) based
+on Go and HTTP/2.
+
+It is always a server, so that you can fetch its
+[`/debug/pprof`](https://golang.org/pkg/net/http/pprof/) (see also
+https://tip.golang.org/doc/diagnostics.html#profiling).
+
+Its performance-oriented URL path is `/blocks`, and it requires three
+query parameters:
+
+- `size`, a positive integer number of bytes;
+- `n`, a positive integer number of blocks to return; and
+- `periodMS`, a positive integer number of milliseconds.
+
+GETting such a URL will return the requested number of blocks of
+bytes, of the requested size each.  The server will attempt to send 1
+block every `periodMS` milliseconds.
+
+If given a `-base-url` on the command line, this program will also act
+as a client.  In its client role it takes request parameters plus also
+`-threads` and `-connections`.  Each thread repeatedly makes a request
+on the server.  Those threads are load-balanced across the given
+number of TLS connections to the server.
+
+In both its roles as client and server, `go_httperf` logs the
+[TLS keys](https://developer.mozilla.org/en-US/docs/Mozilla/Projects/NSS/Key_Log_Format)
+that it uses.
+
+When given `-v=2`, `go_httperf` logs its transmit and receive rates.
+Higher values of `-v` produce more detailed logging.
+
+
 ## Building
 
 Each piece is built on its own.  There are two sorts of pieces here:
