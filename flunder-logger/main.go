@@ -19,6 +19,8 @@ package main
 import (
 	"flag"
 	"fmt"
+	"hash/crc64"
+	"math/rand"
 	"io"
 	"os"
 	"sync"
@@ -236,6 +238,8 @@ func main() {
 	flag.Set("logtostderr", "true")
 	flag.Parse()
 
+	glog.Infof("data-filname=%q, threads=%d\n", dataFilename, numThreads)
+
 	// creates the connection
 	config, err := clientcmd.BuildConfigFromFlags(master, kubeconfig)
 	if err != nil {
@@ -253,9 +257,15 @@ func main() {
 		config.Host = overrideServer
 	}
 	myAddr := GetHostAddr()
-	glog.Infof("Using %s as my host address\n", myAddr)
-	glog.Infof("data-filname=%q, threads=%d\n", dataFilename, numThreads)
-	config.UserAgent = fmt.Sprintf("obj-logger@%s", myAddr)
+	now := time.Now()
+	birthmark := fmt.Sprintf("%02d%02d%02d", now.Hour(), now.Minute(), now.Second())
+	glog.Infof("Using %q as my host address, %q as my birthmark\n", myAddr, birthmark)
+	crcTable := crc64.MakeTable(crc64.ISO)
+	crc := int64(crc64.Checksum(([]byte)(myAddr), crcTable))
+	rand.Seed(now.UnixNano() + crc)
+	rand.Float64()
+	rand.Float64()
+	config.UserAgent = fmt.Sprintf("flunder-logger@%s@%s", myAddr, birthmark)
 
 	if useProtobuf {
 		config.ContentType = "application/vnd.kubernetes.protobuf"
