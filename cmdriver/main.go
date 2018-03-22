@@ -115,8 +115,16 @@ func main() {
 	var wg sync.WaitGroup
 	digits := int(1 + math.Floor(math.Log10(float64(*n))))
 	namefmt := fmt.Sprintf("%%s-%%0%dd", digits)
+	t0 := time.Now()
+	nextOffset := 0.0
 	for i := 1; i <= *n; i++ {
-		time.Sleep(nextTime(randGen, *lambda))
+		nextOffset += nextDelta(randGen, *lambda)
+		now := time.Now()
+		offset := now.Sub(t0).Seconds()
+		gap := nextOffset - offset
+		if gap >= 0.5 {
+			time.Sleep(time.Duration(gap*float64(time.Second) + 0.5))
+		}
 		wg.Add(1)
 		go func(objnum int) {
 			defer wg.Done()
@@ -191,12 +199,12 @@ func setupSignalHandler() (stopCh <-chan struct{}) {
 	return stop
 }
 
-func nextTime(randGen *rand.Rand, rateParameter float64) time.Duration {
-	nextTimeSeconds := randGen.ExpFloat64() / rateParameter
-	if nextTimeSeconds > 300 {
-		nextTimeSeconds = 300
+func nextDelta(randGen *rand.Rand, rateParameter float64) float64 {
+	nextDeltaSeconds := randGen.ExpFloat64() / rateParameter
+	if nextDeltaSeconds > 300 {
+		nextDeltaSeconds = 300
 	}
-	return time.Duration(nextTimeSeconds * float64(time.Second))
+	return nextDeltaSeconds
 }
 
 func formatTime(t time.Time) string {
