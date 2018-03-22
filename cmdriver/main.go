@@ -122,8 +122,9 @@ func main() {
 		now := time.Now()
 		offset := now.Sub(t0).Seconds()
 		gap := nextOffset - offset
-		if gap >= 0.5 {
-			time.Sleep(time.Duration(gap*float64(time.Second) + 0.5))
+		toSleep := time.Duration(gap*float64(time.Second) + 0.5)
+		if toSleep > 0 {
+			time.Sleep(toSleep)
 		}
 		wg.Add(1)
 		go func(objnum int) {
