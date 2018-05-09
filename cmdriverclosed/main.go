@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -26,7 +27,7 @@ import (
 )
 
 var kubeconfigPath = flag.String("kubeconfig", "", "Path to kubeconfig file")
-var n = flag.Int("n", 300, "Total number of objects to create")
+var n = flag.Uint64("n", 300, "Total number of objects to create")
 var conns = flag.Int("conns", 1, "Number of connections to use")
 var threads = flag.Int("threads", 1, "Total number of threads to use")
 var dataFilename = flag.String("datafile", "{{.RunID}}-driver.csv", "Name of CSV file to create")
@@ -67,6 +68,14 @@ func main() {
 	randGen.Int63()
 	randGen.Int63()
 
+	/* connect to the API server */
+	config, err := getClientConfig(*kubeconfigPath)
+	if err != nil {
+		glog.Errorf("Unable to get kube client config: %s", err)
+		os.Exit(20)
+	}
+	config.RateLimiter = flowcontrol.NewFakeAlwaysRateLimiter()
+
 	parmFileName := *runID + "-driver.parms"
 	parmFile, err := os.Create(parmFileName)
 	if err != nil {
@@ -74,6 +83,7 @@ func main() {
 		os.Exit(10)
 	}
 	parmFile.WriteString(fmt.Sprintf("KUBECONFIG=%q\n", *kubeconfigPath))
+	parmFile.WriteString(fmt.Sprintf("APISERVER=%q\n", config.Host))
 	parmFile.WriteString(fmt.Sprintf("N=%d\n", *n))
 	parmFile.WriteString(fmt.Sprintf("CONNS=%d\n", *conns))
 	parmFile.WriteString(fmt.Sprintf("THREADS=%d\n", *threads))
@@ -87,13 +97,9 @@ func main() {
 	fmt.Printf("RunID is %s\n", *runID)
 	fmt.Printf("Wrote parameter file %q\n", parmFileName)
 
-	/* connect to the API server */
-	config, err := getClientConfig(*kubeconfigPath)
-	if err != nil {
-		glog.Errorf("Unable to get kube client config: %s", err)
-		os.Exit(20)
-	}
-	config.RateLimiter = flowcontrol.NewFakeAlwaysRateLimiter()
+	toCreate = make(chan int, *n)
+	toUpdate = make(chan int, *n)
+	toDelete = make(chan int, *n)
 
 	clientsets := make([]*kubeclient.Clientset, *conns)
 	for idx := range clientsets {
@@ -111,6 +117,7 @@ func main() {
 	}
 
 	fmt.Printf("DEBUG: Creating %d objects\n", *n)
+	fmt.Printf("DEBUG: API server is %s\n", config.Host)
 	fmt.Printf("DEBUG: CONNS = %d\n", *conns)
 	fmt.Printf("DEBUG: THREADS = %d\n", *threads)
 	var wg sync.WaitGroup
@@ -119,10 +126,14 @@ func main() {
 	t0 := time.Now()
 	for i := 1; i <= *threads; i++ {
 		wg.Add(1)
-		go func(objnum int) {
+		go func(thd int) {
 			defer wg.Done()
-			RunObjLifeCycle(clientsets[i%*conns], csvFile, namefmt, *runID, objnum, *threads, *n)
+			RunObjLifeCycle(clientsets[thd%*conns], csvFile, namefmt, *runID, *n)
 		}(i)
+	}
+
+	for i := 1; uint64(i) <= *n; i++ {
+		toCreate <- i
 	}
 
 	fmt.Printf("DEBUG: waiting for objects to clear\n")
@@ -131,46 +142,106 @@ func main() {
 	dt := tf.Sub(t0)
 	dts := dt.Seconds()
 	rate := 3.0 * float64(*n) / dts
-	fmt.Printf("%d object lifecycles in %g seconds = %g writes/sec\n", *n, dts, rate)
+	fmt.Printf("%d object lifecycles in %g seconds = %g writes/sec, with %d errors on create, %d on update, and %d on delete\n", *n, dts, rate, createErrors, updateErrors, deleteErrors)
 	//os.Exit(0)
 
 }
+
+var created, updated, deleted uint64
+var toCreate, toUpdate, toDelete chan int
+var createErrors, updateErrors, deleteErrors int64
 
 /* =========================================== */
 /* simulate the lifecycle of a single object   */
 /* =========================================== */
 
-func RunObjLifeCycle(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID string, phase, stride, n int) {
+func RunObjLifeCycle(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID string, n uint64) {
 	var err error
 
-	for i := phase; i <= n; i += stride {
-		objname := fmt.Sprintf(namefmt, runID, i)
-		/* create the object */
-		obj := &kubecorev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      objname,
-				Namespace: namespace,
-				Labels:    map[string]string{"purpose": "scaletest"},
-			},
-			Data: map[string]string{"foo": "bar"},
+CreateLoop:
+	for {
+		select {
+		case i, ok := <-toCreate:
+			glog.V(4).Infof("toCreate yielded %d, %t\n", i, ok)
+			if !ok {
+				break CreateLoop
+			}
+			objname := fmt.Sprintf(namefmt, runID, i)
+			/* create the object */
+			obj := &kubecorev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      objname,
+					Namespace: namespace,
+					Labels:    map[string]string{"purpose": "scaletest"},
+				},
+				Data: map[string]string{"foo": "bar"},
+			}
+			t10 := time.Now()
+			_, err = clientset.CoreV1().ConfigMaps(namespace).Create(obj)
+			t1f := time.Now()
+			writelog("create", obj.Name, t10, t1f, csvFile, err)
+			if err != nil {
+				atomic.AddInt64(&createErrors, 1)
+			}
+			toUpdate <- i
+			if atomic.AddUint64(&created, 1) >= n {
+				close(toCreate)
+				glog.V(2).Info("Closed toCreate\n")
+			}
 		}
-		t10 := time.Now()
-		_, err = clientset.CoreV1().ConfigMaps(namespace).Create(obj)
-		t1f := time.Now()
-		writelog("create", obj.Name, t10, t1f, csvFile, err)
-
-		t20 := time.Now()
-		_, err = clientset.CoreV1().ConfigMaps(namespace).Patch(obj.Name, types.StrategicMergePatchType, []byte(`{"data": {"baz": "zab"}}`), "")
-		t2f := time.Now()
-		writelog("update", obj.Name, t20, t2f, csvFile, err)
-
-		/* delete the object */
-		delopts := &metav1.DeleteOptions{}
-		t30 := time.Now()
-		err = clientset.CoreV1().ConfigMaps(namespace).Delete(obj.Name, delopts)
-		t3f := time.Now()
-		writelog("delete", obj.Name, t30, t3f, csvFile, err)
 	}
+
+UpdateLoop:
+	for {
+		select {
+		case i, ok := <-toUpdate:
+			glog.V(4).Infof("toUpdate yielded %d, %t\n", i, ok)
+
+			if !ok {
+				break UpdateLoop
+			}
+			objname := fmt.Sprintf(namefmt, runID, i)
+			/* Update the object */
+			t20 := time.Now()
+			_, err = clientset.CoreV1().ConfigMaps(namespace).Patch(objname, types.StrategicMergePatchType, []byte(`{"data": {"baz": "zab"}}`), "")
+			t2f := time.Now()
+			writelog("update", objname, t20, t2f, csvFile, err)
+			if err != nil {
+				atomic.AddInt64(&updateErrors, 1)
+			}
+			toDelete <- i
+			if atomic.AddUint64(&updated, 1) >= n {
+				close(toUpdate)
+				glog.V(2).Info("Closed toUpdate\n")
+			}
+		}
+	}
+
+DeleteLoop:
+	for {
+		select {
+		case i, ok := <-toDelete:
+			glog.V(4).Infof("toDelete yielded %d, %t\n", i, ok)
+			if !ok {
+				break DeleteLoop
+			}
+			objname := fmt.Sprintf(namefmt, runID, i)
+			/* delete the object */
+			delopts := &metav1.DeleteOptions{}
+			t30 := time.Now()
+			err = clientset.CoreV1().ConfigMaps(namespace).Delete(objname, delopts)
+			t3f := time.Now()
+			writelog("delete", objname, t30, t3f, csvFile, err)
+			if err != nil {
+				atomic.AddInt64(&deleteErrors, 1)
+			}
+			if atomic.AddUint64(&deleted, 1) >= n {
+				close(toDelete)
+				glog.V(2).Info("Closed toDelete\n")
+			}
+		}
+	}
+
 }
 
 func getClientConfig(kubeconfig string) (restConfig *rest.Config, err error) {
