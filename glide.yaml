@@ -2,22 +2,22 @@ package: github.com/MikeSpreitzer/k8api-scaletest
 import:
 - package: github.com/golang/glog
 - package: k8s.io/api
-  version: release-1.8
+  version: release-1.9
   subpackages:
   - core/v1
 - package: k8s.io/apimachinery
-  version: release-1.8
+  version: release-1.9
   subpackages:
   - pkg/apis/meta/v1
 - package: k8s.io/client-go
-  version: ^v5
+  version: ^v6
   subpackages:
   - kubernetes
   - rest
   - tools/clientcmd
   - util/flowcontrol
 - package: k8s.io/sample-apiserver
-  version: release-1.8
+  version: release-1.9
 - package: golang.org/x/net
   version: release-branch.go1.9
   subpackages:
