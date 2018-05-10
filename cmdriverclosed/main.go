@@ -28,7 +28,7 @@ import (
 
 var kubeconfigPath = flag.String("kubeconfig", "", "Path to kubeconfig file")
 var n = flag.Uint64("n", 300, "Total number of objects to create")
-var conns = flag.Int("conns", 1, "Number of connections to use")
+var conns = flag.Int("conns", 0, "Number of connections to use; 0 means to use all the endpoints of the kubernetes service")
 var threads = flag.Int("threads", 1, "Total number of threads to use")
 var targetRate = flag.Float64("rate", 100, "Target aggregate rate, in ops/sec")
 var dataFilename = flag.String("datafile", "{{.RunID}}-driver.csv", "Name of CSV file to create")
@@ -84,7 +84,6 @@ func main() {
 		os.Exit(10)
 	}
 	parmFile.WriteString(fmt.Sprintf("KUBECONFIG=%q\n", *kubeconfigPath))
-	parmFile.WriteString(fmt.Sprintf("APISERVER=%q\n", config.Host))
 	parmFile.WriteString(fmt.Sprintf("N=%d\n", *n))
 	parmFile.WriteString(fmt.Sprintf("CONNS=%d\n", *conns))
 	parmFile.WriteString(fmt.Sprintf("THREADS=%d\n", *threads))
@@ -92,21 +91,46 @@ func main() {
 	parmFile.WriteString(fmt.Sprintf("DATEFILENAME=%q\n", *dataFilename))
 	parmFile.WriteString(fmt.Sprintf("RUNID=%q\n", *runID))
 	parmFile.WriteString(fmt.Sprintf("SEED=%d\n", *seed))
+
+	urClientset, err := kubeclient.NewForConfig(config)
+	if err != nil {
+		glog.Errorf("Failed to create a clientset: %s\n", err)
+		os.Exit(21)
+	}
+
+	var endpoints []string
+	var clientsets []*kubeclient.Clientset
+	if *conns != 1 {
+		endpoints, err = GetEndpoints(urClientset, "kubernetes", "default", "TCP", "https")
+		if err != nil {
+			glog.Error(err)
+			os.Exit(22)
+		}
+		if *conns == 0 || *conns > len(endpoints) {
+			if *conns > 0 {
+				glog.Warningf("Only %d endpoints available\n", len(endpoints))
+			}
+			*conns = len(endpoints)
+		} else if *conns < len(endpoints) {
+			endpoints = endpoints[:*conns]
+		}
+		clientsets, err = ClientsetsForEndpoints(config, endpoints)
+		if err != nil {
+			glog.Error(err)
+			os.Exit(23)
+		}
+	} else {
+		endpoints = []string{config.Host}
+		clientsets = []*kubeclient.Clientset{urClientset}
+	}
+	parmFile.WriteString(fmt.Sprintf("ENDPOINTS=\"%s\"\n", endpoints))
+
 	if err = parmFile.Close(); err != nil {
 		glog.Errorf("Failed to close parameter file named %q: %s\n", parmFileName, err)
 		os.Exit(11)
 	}
 	fmt.Printf("RunID is %s\n", *runID)
 	fmt.Printf("Wrote parameter file %q\n", parmFileName)
-
-	clientsets := make([]*kubeclient.Clientset, *conns)
-	for idx := range clientsets {
-		clientsets[idx], err = kubeclient.NewForConfig(config)
-		if err != nil {
-			glog.Error("Failed to create a clientset: %s\n", err)
-			os.Exit(21)
-		}
-	}
 
 	/* open the CVS file we are going to write */
 	csvFile, err := os.Create(*dataFilename)
@@ -115,7 +139,7 @@ func main() {
 	}
 
 	fmt.Printf("DEBUG: Creating %d objects\n", *n)
-	fmt.Printf("DEBUG: API server is %s\n", config.Host)
+	fmt.Printf("DEBUG: endpoints are %v\n", endpoints)
 	fmt.Printf("DEBUG: CONNS = %d\n", *conns)
 	fmt.Printf("DEBUG: THREADS = %d\n", *threads)
 	fmt.Printf("DEBUG: RATE = %g/sec\n", *targetRate)
@@ -173,7 +197,7 @@ var createErrors, updateErrors, deleteErrors int64
 /* =========================================== */
 
 func RunCreates(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID string, n uint64, tbase time.Time, thd, stride int, opPeriod float64) {
-	glog.V(2).Infof("Thread %d creating with clientset %p\n", thd, clientset)
+	glog.V(3).Infof("Thread %d creating with clientset %p\n", thd, clientset)
 	for i := thd; uint64(i) <= n; i += stride {
 		dt := float64(i) * opPeriod * float64(time.Second)
 		targt := tbase.Add(time.Duration(dt))
@@ -206,7 +230,7 @@ func RunCreates(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runI
 }
 
 func RunUpdates(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID string, n uint64, tbase time.Time, thd, stride int, opPeriod float64) {
-	glog.V(2).Infof("Thread %d updating with clientset %p\n", thd, clientset)
+	glog.V(3).Infof("Thread %d updating with clientset %p\n", thd, clientset)
 	for i := thd; uint64(i) <= n; i += stride {
 		dt := float64(i) * opPeriod * float64(time.Second)
 		targt := tbase.Add(time.Duration(dt))
@@ -231,7 +255,7 @@ func RunUpdates(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runI
 }
 
 func RunDeletes(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID string, n uint64, tbase time.Time, thd, stride int, opPeriod float64) {
-	glog.V(2).Infof("Thread %d deleting with clientset %p\n", thd, clientset)
+	glog.V(3).Infof("Thread %d deleting with clientset %p\n", thd, clientset)
 	for i := thd; uint64(i) <= n; i += stride {
 		dt := float64(i) * opPeriod * float64(time.Second)
 		targt := tbase.Add(time.Duration(dt))
