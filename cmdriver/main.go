@@ -31,6 +31,7 @@ var maxpop = flag.Int("maxpop", 100, "Maximum object population in system")
 var dataFilename = flag.String("datafile", "{{.RunID}}-driver.csv", "Name of CSV file to create")
 var runID = flag.String("runid", "", "unique ID of this run (default is randomly generated)")
 var seed = flag.Int64("seed", 0, "seed for random numbers (other than runid) (default is based on time)")
+var clientLB = flag.Bool("clientlb", false, "Load balance in this client")
 
 const namespace = "scaletest"
 
@@ -89,15 +90,29 @@ func main() {
 	/* connect to the API server */
 	config, err := getClientConfig(*kubeconfigPath)
 	if err != nil {
-		glog.Errorf("Unable to get kube client config: %s", err)
+		glog.Errorf("Unable to get kube client config: %s\n", err)
 		os.Exit(20)
 	}
 	config.RateLimiter = flowcontrol.NewFakeAlwaysRateLimiter()
 
 	clientset, err := kubeclient.NewForConfig(config)
 	if err != nil {
-		glog.Error("Failed to create a clientset: %s\n", err)
+		glog.Errorf("Failed to create a clientset: %s\n", err)
 		os.Exit(21)
+	}
+
+	var clientsetSrc ClientsetSrc
+	if *clientLB {
+		var eps []string
+		clientsetSrc, eps, err = MultiClientsetSrc(config, clientset, "kubernetes", "default", "TCP", "https", *seed)
+		if err != nil {
+			glog.Error(err)
+			os.Exit(22)
+		}
+		glog.Infof("Balancing load among %s\n", eps)
+	} else {
+		clientsetSrc = SingleClientsetSrc(clientset)
+		glog.Infof("Sending requests to %s\n", config.Host)
 	}
 
 	/* open the CVS file we are going to write */
@@ -130,7 +145,7 @@ func main() {
 		go func(objnum int) {
 			defer wg.Done()
 			objname := fmt.Sprintf(namefmt, *runID, objnum)
-			RunObjLifeCycle(clientset, csvFile, objname, ttl)
+			RunObjLifeCycle(clientsetSrc, csvFile, objname, ttl)
 		}(i)
 	}
 
@@ -144,7 +159,7 @@ func main() {
 /* simulate the lifecycle of a single object   */
 /* =========================================== */
 
-func RunObjLifeCycle(clientset *kubeclient.Clientset, csvFile *os.File, objname string, ttl time.Duration) {
+func RunObjLifeCycle(clientsetSrc ClientsetSrc, csvFile *os.File, objname string, ttl time.Duration) {
 	var err error
 
 	/* create the object */
@@ -157,7 +172,10 @@ func RunObjLifeCycle(clientset *kubeclient.Clientset, csvFile *os.File, objname 
 		Data: map[string]string{"foo": "bar"},
 	}
 	t10 := time.Now()
-	_, err = clientset.CoreV1().ConfigMaps(namespace).Create(obj)
+	err = clientsetSrc.WithInterface(func(clientset kubeclient.Interface) error {
+		_, err := clientset.CoreV1().ConfigMaps(namespace).Create(obj)
+		return err
+	})
 	t1f := time.Now()
 	writelog("create", obj.Name, t10, t1f, csvFile, err)
 
@@ -167,7 +185,9 @@ func RunObjLifeCycle(clientset *kubeclient.Clientset, csvFile *os.File, objname 
 	/* delete the object */
 	delopts := &metav1.DeleteOptions{}
 	t20 := time.Now()
-	err = clientset.CoreV1().ConfigMaps(namespace).Delete(obj.Name, delopts)
+	err = clientsetSrc.WithInterface(func(clientset kubeclient.Interface) error {
+		return clientset.CoreV1().ConfigMaps(namespace).Delete(obj.Name, delopts)
+	})
 	t2f := time.Now()
 	writelog("delete", obj.Name, t20, t2f, csvFile, err)
 }
