@@ -1,0 +1,26 @@
+# #####################################
+# headless service for the loggers
+#
+# the "prometheus.io/scrape: 'true'"
+# annotation instructs prometheus to
+# scrape each of the endpoints of this
+# service
+# #####################################
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    prometheus.io/scrape: 'true'
+  name: cm-logger
+  namespace: scaletest
+  labels:
+    app: cm-logger
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app: cm-logger
+  ports:
+  - name: prometheus-metrics
+    port: 9101
+    protocol: TCP

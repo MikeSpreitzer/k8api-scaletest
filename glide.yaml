@@ -22,3 +22,7 @@ import:
   version: release-branch.go1.9
   subpackages:
   - http2
+- package: github.com/prometheus/client_golang
+  version: ^0.8
+  subpackages:
+  - prometheus

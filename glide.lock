@@ -1,6 +1,10 @@
-hash: ab99c5a7639a661b79f3a373b55482286e210c59461e0577b2ca2a5621cd3a44
-updated: 2018-05-09T15:18:35.304531-04:00
+hash: bb952c9a0e25f417c28554f8a8d526050a42ba6f72ff0565de2305d1513b9167
+updated: 2018-05-21T10:58:47.447988-04:00
 imports:
+- name: github.com/beorn7/perks
+  version: 4c0e84591b9aa9e6dcfdf3e020114cd81f89d5f9
+  subpackages:
+  - quantile
 - name: github.com/davecgh/go-spew
   version: 782f4967f2dc4564575ca782fe2d04090b5faca8
   subpackages:
@@ -66,8 +70,30 @@ imports:
   - buffer
   - jlexer
   - jwriter
+- name: github.com/matttproud/golang_protobuf_extensions
+  version: fc2b8d3a73c4867e51861bbdd5ae3c1f0869dd6a
+  subpackages:
+  - pbutil
 - name: github.com/peterbourgon/diskv
   version: 5f041e8faa004a95c88a202771f4cc3e991971e6
+- name: github.com/prometheus/client_golang
+  version: 967789050ba94deca04a5e84cce8ad472ce313c1
+  subpackages:
+  - prometheus
+- name: github.com/prometheus/client_model
+  version: fa8ad6fec33561be4280a8f0514318c79d7f6cb6
+  subpackages:
+  - go
+- name: github.com/prometheus/common
+  version: 13ba4ddd0caa9c28ca7b7bffe1dfa9ed8d5ef207
+  subpackages:
+  - expfmt
+  - internal/bitbucket.org/ww/goautoneg
+  - model
+- name: github.com/prometheus/procfs
+  version: 65c1f6f8f0fc1e2185eb9863a3bc751496404259
+  subpackages:
+  - xfs
 - name: github.com/PuerkitoBio/purell
   version: 8a290539e2e8629dbc4e6bad948158f790ec31f4
 - name: github.com/PuerkitoBio/urlesc
@@ -110,7 +136,7 @@ imports:
 - name: gopkg.in/yaml.v2
   version: 53feefa2559fb8dfa8d81baad31be332c97d6c77
 - name: k8s.io/api
-  version: 53400f2739169693b7f1f64cf856f6d3d780d3db
+  version: 9273ee02527c608cecc74969b3e489f5dba686da
   subpackages:
   - admissionregistration/v1alpha1
   - admissionregistration/v1beta1
@@ -141,7 +167,7 @@ imports:
   - storage/v1alpha1
   - storage/v1beta1
 - name: k8s.io/apimachinery
-  version: 4a1945a9cfdfa104d202059c7e64250618d8d009
+  version: 21efb2924c7cf1920f76af05b1fd6a325bf46dfc
   subpackages:
   - pkg/api/errors
   - pkg/api/meta
@@ -299,12 +325,12 @@ imports:
   - util/integer
   - util/workqueue
 - name: k8s.io/kube-openapi
-  version: 39a7bf85c140f972372c2a0d1ee40adbf0c8bfe1
+  version: 7ee50c0aa8059d610950c952a9ed7a5e33ab336a
   subpackages:
   - pkg/common
   - pkg/util/proto
 - name: k8s.io/sample-apiserver
-  version: ffda12b0a63575cfe8d64cc40c5ba18b86ac0ae6
+  version: 10b3a209a419458dfcf718bbbd77b97ebb15aef1
   subpackages:
   - pkg/apis/wardle
   - pkg/apis/wardle/v1alpha1

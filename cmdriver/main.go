@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -24,6 +25,14 @@ import (
 	"k8s.io/client-go/util/flowcontrol"
 )
 
+const (
+	// The name of the annotation holding the client-side creation timestamp.
+	CreateTimestampAnnotation = "scaletest/createTimestamp"
+
+	// The layout of the annotation holding the client-side creation timestamp.
+	CreateTimestampLayout = "2006-01-02 15:04:05.000 -0700"
+)
+
 var kubeconfigPath = flag.String("kubeconfig", "", "Path to kubeconfig file")
 var lambda = flag.Float64("lambda", 1.0, "Rate (1/s) at which new objects are created")
 var n = flag.Int("n", 300, "Total number of objects to create")
@@ -32,6 +41,8 @@ var dataFilename = flag.String("datafile", "{{.RunID}}-driver.csv", "Name of CSV
 var runID = flag.String("runid", "", "unique ID of this run (default is randomly generated)")
 var seed = flag.Int64("seed", 0, "seed for random numbers (other than runid) (default is based on time)")
 var clientLB = flag.Bool("clientlb", false, "Load balance in this client")
+
+var totErrCount uint32 = 0
 
 const namespace = "scaletest"
 
@@ -151,8 +162,7 @@ func main() {
 
 	fmt.Printf("DEBUG: waiting for objects to clear\n")
 	wg.Wait()
-	os.Exit(0)
-
+	glog.Infof("%d logged errors\n", totErrCount)
 }
 
 /* =========================================== */
@@ -161,23 +171,29 @@ func main() {
 
 func RunObjLifeCycle(clientsetSrc ClientsetSrc, csvFile *os.File, objname string, ttl time.Duration) {
 	var err error
+	var locErrCount uint32
 
 	/* create the object */
 	obj := &kubecorev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      objname,
-			Namespace: namespace,
-			Labels:    map[string]string{"purpose": "scaletest"},
+			Name:        objname,
+			Namespace:   namespace,
+			Labels:      map[string]string{"purpose": "scaletest"},
+			Annotations: make(map[string]string, 1),
 		},
 		Data: map[string]string{"foo": "bar"},
 	}
 	t10 := time.Now()
+	obj.Annotations[CreateTimestampAnnotation] = t10.Format(CreateTimestampLayout)
 	err = clientsetSrc.WithInterface(func(clientset kubeclient.Interface) error {
 		_, err := clientset.CoreV1().ConfigMaps(namespace).Create(obj)
 		return err
 	})
 	t1f := time.Now()
 	writelog("create", obj.Name, t10, t1f, csvFile, err)
+	if err != nil {
+		locErrCount += 1
+	}
 
 	/* ttl is the target lifetime of the object */
 	time.Sleep(ttl)
@@ -190,6 +206,12 @@ func RunObjLifeCycle(clientsetSrc ClientsetSrc, csvFile *os.File, objname string
 	})
 	t2f := time.Now()
 	writelog("delete", obj.Name, t20, t2f, csvFile, err)
+	if err != nil {
+		locErrCount += 1
+	}
+	if locErrCount > 0 {
+		atomic.AddUint32(&totErrCount, locErrCount)
+	}
 }
 
 func getClientConfig(kubeconfig string) (restConfig *rest.Config, err error) {

@@ -20,6 +20,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"sync"
 	"time"
@@ -37,15 +38,45 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/workqueue"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+)
+
+const (
+
+	// The HTTP port under which the scraping endpoint ("/metrics") is served.
+	MetricsAddr = ":9101"
+
+	// The HTTP path under which the scraping endpoint ("/metrics") is served.
+	MetricsPath = "/metrics"
+
+	// The namespace, subsystem and name of the histogram collected by this controller.
+	HistogramNamespace = "scaletest"
+	HistogramSubsystem = "configmaps"
+	HistogramName      = "create_latency_seconds"
+
+	// The name of the annotation holding the client-side creation timestamp.
+	CreateTimestampAnnotation = "scaletest/createTimestamp"
+
+	// The layout of the annotation holding the client-side creation timestamp.
+	CreateTimestampLayout = "2006-01-02 15:04:05.000 -0700"
 )
 
 type Controller struct {
+	myAddr   string
 	queue    workqueue.RateLimitingInterface
 	informer cache.Controller
 	lister   corev1listers.ConfigMapLister
 
 	csvFilename string
 	csvFile     io.Writer
+
+	// A histogram to collect latency samples
+	latencyHistogram *prometheus.HistogramVec
+
+	// Counters for unusual events
+	updateCounter, strangeCounter *prometheus.CounterVec
 
 	sync.Mutex
 
@@ -85,13 +116,65 @@ func (c *Controller) getObjectData(key string, addIfMissing, deleteIfPresent boo
 	return od
 }
 
-func NewController(queue workqueue.RateLimitingInterface, informer cache.Controller, lister corev1listers.ConfigMapLister, csvFilename string) *Controller {
+func NewController(queue workqueue.RateLimitingInterface, informer cache.Controller, lister corev1listers.ConfigMapLister, csvFilename, myAddr string) *Controller {
+	histogram := prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: HistogramNamespace,
+			Subsystem: HistogramSubsystem,
+			Name:      HistogramName,
+			Help:      "Configmap creation notification latency, in seconds",
+
+			Buckets: []float64{-0.1, 0, 0.03125, 0.0625, 0.125, 0.25, 0.5, 1, 2, 4, 8},
+		},
+		[]string{"logger"},
+	)
+	if err := prometheus.Register(histogram); err != nil {
+		glog.Error(err)
+		histogram = nil
+	} else {
+		histogram.With(prometheus.Labels{"logger": myAddr}).Observe(0)
+	}
+
+	updateCounter := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: HistogramNamespace,
+			Subsystem: HistogramSubsystem,
+			Name:      "updates",
+			Help:      "number of updates dequeued",
+		},
+		[]string{"logger"},
+	)
+	if err := prometheus.Register(updateCounter); err != nil {
+		glog.Error(err)
+		updateCounter = nil
+	} else {
+		updateCounter.With(prometheus.Labels{"logger": myAddr}).Add(0)
+	}
+	strangeCounter := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: HistogramNamespace,
+			Subsystem: HistogramSubsystem,
+			Name:      "stranges",
+			Help:      "number of strange situations dequeued",
+		},
+		[]string{"logger"},
+	)
+	if err := prometheus.Register(strangeCounter); err != nil {
+		glog.Error(err)
+		strangeCounter = nil
+	} else {
+		strangeCounter.With(prometheus.Labels{"logger": myAddr}).Add(0)
+	}
 	return &Controller{
-		informer:    informer,
-		queue:       queue,
-		lister:      lister,
-		csvFilename: csvFilename,
-		objects:     make(map[string]*ObjectData),
+		myAddr:           myAddr,
+		informer:         informer,
+		queue:            queue,
+		lister:           lister,
+		csvFilename:      csvFilename,
+		latencyHistogram: histogram,
+		updateCounter:    updateCounter,
+		strangeCounter:   strangeCounter,
+		objects:          make(map[string]*ObjectData),
 	}
 }
 
@@ -160,6 +243,36 @@ func (c *Controller) logDequeue(key string) error {
 		}
 	} else {
 		glog.V(4).Infof("c.csvFile == nil\n")
+	}
+
+	if oqd.queuedAdds+oqd.queuedUpdates+oqd.queuedDeletes != 1 {
+		if c.strangeCounter != nil {
+			c.strangeCounter.
+				With(prometheus.Labels{"logger": c.myAddr}).
+				Add(1)
+		}
+	} else if oqd.queuedUpdates == 1 && c.updateCounter != nil {
+		c.updateCounter.
+			With(prometheus.Labels{"logger": c.myAddr}).
+			Add(1)
+	}
+
+	if op == "create" && c.latencyHistogram != nil {
+		var ctS string
+		if obj != nil && obj.Annotations != nil {
+			ctS = obj.Annotations[CreateTimestampAnnotation]
+		}
+		if ctS != "" {
+			created, err := time.Parse(CreateTimestampLayout, ctS)
+			if err != nil {
+				return nil
+			}
+			latency := now.Sub(created)
+			glog.V(4).Infof("Latency = %v for op=%s, key=%s, now=%s, created=%s, ts=%s\n", latency, op, key, now, created, ctS)
+			c.latencyHistogram.
+				With(prometheus.Labels{"logger": c.myAddr}).
+				Observe(latency.Seconds())
+		}
 	}
 
 	return nil
@@ -261,7 +374,7 @@ func main() {
 	// create the workqueue
 	queue := workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
 
-	controller := NewController(queue, informer, lister, dataFilename)
+	controller := NewController(queue, informer, lister, dataFilename, myAddr)
 
 	// Bind the workqueue to a cache with the help of an informer. This way we make sure that
 	// whenever the cache is updated, the object key is added to the workqueue.
@@ -330,6 +443,12 @@ func main() {
 	stop := make(chan struct{})
 	defer close(stop)
 	go controller.Run(numThreads, stop)
+
+	// Serve Prometheus metrics
+	http.Handle("/metrics", promhttp.Handler())
+	go func() {
+		glog.Error(http.ListenAndServe(MetricsAddr, nil))
+	}()
 
 	// Wait forever
 	select {}

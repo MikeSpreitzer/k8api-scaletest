@@ -9,6 +9,12 @@ This is a kube API client that creates and deletes `ConfigMap`
 objects.  It makes a simple attempt at a Poisson arrival process, and
 a simple attempt at a constant lifetime for each object.
 
+### cmdriverclosed
+
+Another client that thrashes `ConfigMap objects`.  This one uses a
+closed-loop structure and includes one update in each object's
+lifecycle.
+
 ### cm-logger
 
 This is a controller, adapted from
