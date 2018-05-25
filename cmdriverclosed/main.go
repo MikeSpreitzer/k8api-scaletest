@@ -21,7 +21,7 @@ import (
 	types "k8s.io/apimachinery/pkg/types"
 
 	kubeclient "k8s.io/client-go/kubernetes"
-	scheme "k8s.io/client-go/kubernetes/scheme"
+	//	scheme "k8s.io/client-go/kubernetes/scheme"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -182,7 +182,7 @@ var createErrors, updateErrors, deleteErrors int64
 /* simulate the lifecycles of one thread's objects */
 /* =============================================== */
 
-const hackTimeout = true
+const hackTimeout = false
 
 // RunThreads runs n objects through their lifecycle, with the given
 // lag between phases.  The objects are numbered thd, thd+stride,
@@ -252,16 +252,17 @@ func RunThread(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID
 			t10 := time.Now()
 			var err error
 			var result kubecorev1.ConfigMap
-			toSecs := int64(17)
 			if hackTimeout {
 				cv1 := clientset.CoreV1().(*corev1.CoreV1Client)
 				rc := cv1.RESTClient()
 				rc.Post().
 					Namespace(namespace).
 					Resource("configmaps").
-					VersionedParams(
-						&metav1.ListOptions{TimeoutSeconds: &toSecs},
-						scheme.ParameterCodec).
+					Param("timeoutSeconds", "17").
+					Param("i", fmt.Sprintf("%d", i)).
+					//	VersionedParams(
+					//		&metav1.ListOptions{TimeoutSeconds: &toSecs},
+					//		scheme.ParameterCodec).
 					Body(obj).
 					Do().
 					Into(&result)
@@ -325,6 +326,9 @@ func writelog(op string, key string, tBefore, tAfter time.Time, csvFile *os.File
 	errS := ""
 	if err != nil {
 		errS = err.Error()
+		if errS == "" {
+			errS = fmt.Sprintf("%#+v", err)
+		}
 	}
 	// fmt.Printf("%s,%s,%s,%q,%q\n", formatTime(tBefore), formatTime(tAfter), op, key, errS)
 	csvFile.Write([]byte(fmt.Sprintf("%s,%s,%s,%q,%q\n", formatTime(tBefore), formatTime(tAfter), op, key, errS)))
