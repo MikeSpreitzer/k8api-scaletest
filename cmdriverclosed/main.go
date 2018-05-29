@@ -28,6 +28,15 @@ import (
 	"k8s.io/client-go/util/flowcontrol"
 )
 
+const (
+	// The name of the annotation holding the client-side creation timestamp.
+	CreateTimestampAnnotation = "scaletest/createTimestamp"
+	UpdateTimestampAnnotation = "scaletest/updateTimestamp"
+
+	// The layout of the annotation holding the client-side creation timestamp.
+	CreateTimestampLayout = "2006-01-02 15:04:05.000 -0700"
+)
+
 var kubeconfigPath = flag.String("kubeconfig", "", "Path to kubeconfig file")
 var n = flag.Uint64("n", 300, "Total number of objects to create")
 var maxPop = flag.Uint64("maxpop", 100, "Maximum object population in system")
@@ -227,7 +236,9 @@ func RunThread(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID
 			objname := fmt.Sprintf(namefmt, runID, i)
 			/* Update the object */
 			t20 := time.Now()
-			_, err := clientset.CoreV1().ConfigMaps(namespace).Patch(objname, types.StrategicMergePatchType, []byte(`{"data": {"baz": "zab"}}`), "")
+			t20s := t20.Format(CreateTimestampLayout)
+			delta := fmt.Sprintf(`{"data": {"baz": "zab"}, "metadata": {"annotations": {%q: %q}}}`, UpdateTimestampAnnotation, t20s)
+			_, err := clientset.CoreV1().ConfigMaps(namespace).Patch(objname, types.StrategicMergePatchType, []byte(delta), "")
 			t2f := time.Now()
 			writelog("update", objname, t20, t2f, csvFile, err)
 			if err != nil {
@@ -241,15 +252,16 @@ func RunThread(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID
 			iCreate += 1
 			objname := fmt.Sprintf(namefmt, runID, i)
 			/* create the object */
+			t10 := time.Now()
 			obj := &kubecorev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      objname,
-					Namespace: namespace,
-					Labels:    map[string]string{"purpose": "scaletest"},
+					Name:        objname,
+					Namespace:   namespace,
+					Labels:      map[string]string{"purpose": "scaletest"},
+					Annotations: map[string]string{CreateTimestampAnnotation: t10.Format(CreateTimestampLayout)},
 				},
 				Data: map[string]string{"foo": "bar"},
 			}
-			t10 := time.Now()
 			var err error
 			var result kubecorev1.ConfigMap
 			if hackTimeout {

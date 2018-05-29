@@ -52,12 +52,14 @@ const (
 	MetricsPath = "/metrics"
 
 	// The namespace, subsystem and name of the histogram collected by this controller.
-	HistogramNamespace = "scaletest"
-	HistogramSubsystem = "configmaps"
-	HistogramName      = "create_latency_seconds"
+	HistogramNamespace  = "scaletest"
+	HistogramSubsystem  = "configmaps"
+	CreateHistogramName = "create_latency_seconds"
+	UpdateHistogramName = "update_latency_seconds"
 
 	// The name of the annotation holding the client-side creation timestamp.
 	CreateTimestampAnnotation = "scaletest/createTimestamp"
+	UpdateTimestampAnnotation = "scaletest/updateTimestamp"
 
 	// The layout of the annotation holding the client-side creation timestamp.
 	CreateTimestampLayout = "2006-01-02 15:04:05.000 -0700"
@@ -73,7 +75,8 @@ type Controller struct {
 	csvFile     io.Writer
 
 	// A histogram to collect latency samples
-	latencyHistogram *prometheus.HistogramVec
+	createLatencyHistogram *prometheus.HistogramVec
+	updateLatencyHistogram *prometheus.HistogramVec
 
 	// Counters for unusual events
 	updateCounter, strangeCounter *prometheus.CounterVec
@@ -117,22 +120,40 @@ func (c *Controller) getObjectData(key string, addIfMissing, deleteIfPresent boo
 }
 
 func NewController(queue workqueue.RateLimitingInterface, informer cache.Controller, lister corev1listers.ConfigMapLister, csvFilename, myAddr string) *Controller {
-	histogram := prometheus.NewHistogramVec(
+	createHistogram := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: HistogramNamespace,
 			Subsystem: HistogramSubsystem,
-			Name:      HistogramName,
+			Name:      CreateHistogramName,
 			Help:      "Configmap creation notification latency, in seconds",
 
 			Buckets: []float64{-0.1, 0, 0.03125, 0.0625, 0.125, 0.25, 0.5, 1, 2, 4, 8},
 		},
 		[]string{"logger"},
 	)
-	if err := prometheus.Register(histogram); err != nil {
+	if err := prometheus.Register(createHistogram); err != nil {
 		glog.Error(err)
-		histogram = nil
+		createHistogram = nil
 	} else {
-		histogram.With(prometheus.Labels{"logger": myAddr}).Observe(0)
+		createHistogram.With(prometheus.Labels{"logger": myAddr}).Observe(0)
+	}
+
+	updateHistogram := prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: HistogramNamespace,
+			Subsystem: HistogramSubsystem,
+			Name:      UpdateHistogramName,
+			Help:      "Configmap creation notification latency, in seconds",
+
+			Buckets: []float64{-0.1, 0, 0.03125, 0.0625, 0.125, 0.25, 0.5, 1, 2, 4, 8},
+		},
+		[]string{"logger"},
+	)
+	if err := prometheus.Register(updateHistogram); err != nil {
+		glog.Error(err)
+		updateHistogram = nil
+	} else {
+		updateHistogram.With(prometheus.Labels{"logger": myAddr}).Observe(0)
 	}
 
 	updateCounter := prometheus.NewCounterVec(
@@ -166,15 +187,16 @@ func NewController(queue workqueue.RateLimitingInterface, informer cache.Control
 		strangeCounter.With(prometheus.Labels{"logger": myAddr}).Add(0)
 	}
 	return &Controller{
-		myAddr:           myAddr,
-		informer:         informer,
-		queue:            queue,
-		lister:           lister,
-		csvFilename:      csvFilename,
-		latencyHistogram: histogram,
-		updateCounter:    updateCounter,
-		strangeCounter:   strangeCounter,
-		objects:          make(map[string]*ObjectData),
+		myAddr:                 myAddr,
+		informer:               informer,
+		queue:                  queue,
+		lister:                 lister,
+		csvFilename:            csvFilename,
+		createLatencyHistogram: createHistogram,
+		updateLatencyHistogram: updateHistogram,
+		updateCounter:          updateCounter,
+		strangeCounter:         strangeCounter,
+		objects:                make(map[string]*ObjectData),
 	}
 }
 
@@ -257,19 +279,24 @@ func (c *Controller) logDequeue(key string) error {
 			Add(1)
 	}
 
-	if op == "create" && c.latencyHistogram != nil {
+	if op != "delete" && obj != nil && obj.Annotations != nil {
 		var ctS string
-		if obj != nil && obj.Annotations != nil {
+		var latencyHistogram *prometheus.HistogramVec
+		if op == "create" {
 			ctS = obj.Annotations[CreateTimestampAnnotation]
+			latencyHistogram = c.createLatencyHistogram
+		} else {
+			ctS = obj.Annotations[UpdateTimestampAnnotation]
+			latencyHistogram = c.updateLatencyHistogram
 		}
-		if ctS != "" {
-			created, err := time.Parse(CreateTimestampLayout, ctS)
+		if ctS != "" && latencyHistogram != nil {
+			clientTime, err := time.Parse(CreateTimestampLayout, ctS)
 			if err != nil {
 				return nil
 			}
-			latency := now.Sub(created)
-			glog.V(4).Infof("Latency = %v for op=%s, key=%s, now=%s, created=%s, ts=%s\n", latency, op, key, now, created, ctS)
-			c.latencyHistogram.
+			latency := now.Sub(clientTime)
+			glog.V(4).Infof("Latency = %v for op=%s, key=%s, now=%s, clientTime=%s, ts=%s\n", latency, op, key, now, clientTime, ctS)
+			latencyHistogram.
 				With(prometheus.Labels{"logger": c.myAddr}).
 				Observe(latency.Seconds())
 		}
