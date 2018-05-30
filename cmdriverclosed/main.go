@@ -43,6 +43,9 @@ var maxPop = flag.Uint64("maxpop", 100, "Maximum object population in system")
 var conns = flag.Int("conns", 0, "Number of connections to use; 0 means to use all the endpoints of the kubernetes service")
 var threads = flag.Uint64("threads", 1, "Total number of threads to use")
 var targetRate = flag.Float64("rate", 100, "Target aggregate rate, in ops/sec")
+var createValueLength = flag.Int("create-value-length", 100, "Length of data value in create operation")
+var updateValueLength = flag.Int("update-value-length", 100, "Length of data value in update operation")
+var updates = flag.Uint64("updates", 1, "number of updates in one object's lifecycle")
 var dataFilename = flag.String("datafile", "{{.RunID}}-driver.csv", "Name of CSV file to create")
 var runID = flag.String("runid", "", "unique ID of this run (default is randomly generated)")
 var seed = flag.Int64("seed", 0, "seed for random numbers (other than runid) (default is based on time)")
@@ -101,7 +104,10 @@ func main() {
 	parmFile.WriteString(fmt.Sprintf("CONNS=%d\n", *conns))
 	parmFile.WriteString(fmt.Sprintf("THREADS=%d\n", *threads))
 	parmFile.WriteString(fmt.Sprintf("RATE=%g\n", *targetRate))
-	parmFile.WriteString(fmt.Sprintf("DATEFILENAME=%q\n", *dataFilename))
+	parmFile.WriteString(fmt.Sprintf("UPDATES=%d\n", *updates))
+	parmFile.WriteString(fmt.Sprintf("CREATE_VALUE_LENGTH=%d\n", *createValueLength))
+	parmFile.WriteString(fmt.Sprintf("UPDATE_VALUE_LENGTH=%g\n", *updateValueLength))
+	parmFile.WriteString(fmt.Sprintf("DATAFILENAME=%q\n", *dataFilename))
 	parmFile.WriteString(fmt.Sprintf("RUNID=%q\n", *runID))
 	parmFile.WriteString(fmt.Sprintf("SEED=%d\n", *seed))
 
@@ -142,7 +148,7 @@ func main() {
 		glog.Errorf("Failed to close parameter file named %q: %s\n", parmFileName, err)
 		os.Exit(11)
 	}
-	fmt.Printf("RunID is %s\n", *runID)
+	glog.Infof("RunID is %s\n", *runID)
 	fmt.Printf("Wrote parameter file %q\n", parmFileName)
 
 	/* open the CVS file we are going to write */
@@ -157,6 +163,17 @@ func main() {
 	fmt.Printf("DEBUG: CONNS = %d\n", *conns)
 	fmt.Printf("DEBUG: THREADS = %d\n", *threads)
 	fmt.Printf("DEBUG: RATE = %g/sec\n", *targetRate)
+	fmt.Printf("DEBUG: UPDATES = %d\n", *updates)
+	fmt.Printf("DEBUG: CreateValueLength = %d\n", *createValueLength)
+	fmt.Printf("DEBUG: UpdateValueLength = %d\n", *updateValueLength)
+	createValue := ""
+	if *createValueLength > 0 {
+		createValue = strings.Repeat("X", *createValueLength)
+	}
+	updateValue := ""
+	if *updateValueLength > 0 {
+		updateValue = strings.Repeat("Y", *updateValueLength)
+	}
 	opPeriod := 1 / *targetRate
 	fmt.Printf("DEBUG: op period = %g sec\n", opPeriod)
 	digits := int(1 + math.Floor(math.Log10(float64(*n))))
@@ -168,12 +185,14 @@ func main() {
 		wg.Add(1)
 		go func(thd uint64) {
 			defer wg.Done()
-			lag := (*maxPop + thd) / (2 * *threads)
+			// maxpop = [ lag + updates*(lag-1) ] * threads
+			// maxpop + updates*threads = lag * (1 + updates) * threads
+			lag := (*maxPop + *updates*(*threads) + thd) / ((1 + *updates) * *threads)
 			if lag < 1 {
 				lag = 1
 			}
 			numHere := (*n + thd) / (*threads)
-			RunThread(clientsets[thd%uint64(*conns)], csvFile, namefmt, *runID, t0, numHere, lag, thd+1, *threads, opPeriod)
+			RunThread(clientsets[thd%uint64(*conns)], csvFile, namefmt, *runID, createValue, updateValue, t0, *updates, numHere, lag, thd+1, *threads, opPeriod)
 		}(i)
 	}
 	glog.V(2).Info("waiting for threads to finish\n")
@@ -181,7 +200,7 @@ func main() {
 	tf := time.Now()
 	dt := tf.Sub(t0)
 	dts := dt.Seconds()
-	rate := 3.0 * float64(*n) / dts
+	rate := float64(2+*updates) * float64(*n) / dts
 	glog.Infof("%d object lifecycles in %g seconds = %g writes/sec, with %d errors on create, %d on update, and %d on delete\n", *n, dts, rate, createErrors, updateErrors, deleteErrors)
 }
 
@@ -197,70 +216,42 @@ const hackTimeout = false
 // lag between phases.  The objects are numbered thd, thd+stride,
 // thd+2*stride, and so on.
 
-func RunThread(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID string, tbase time.Time, n, lag, thd, stride uint64, opPeriod float64) {
+func RunThread(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID, createValue, updateValue string, tbase time.Time, updates, n, lag, thd, stride uint64, opPeriod float64) {
 	glog.V(3).Infof("Thread %d creating %d objects with lag %d, stride %d, clientset %p\n", thd, n, lag, stride, clientset)
-	var iCreate, iUpdate, iDelete uint64
-	for iDelete < n {
-		dt := float64((iCreate+iUpdate+iDelete)*stride+thd) * opPeriod * float64(time.Second)
+	var iByPhase []uint64 = make([]uint64, 2+updates)
+	var iSum uint64
+	lastPhase := 1 + updates
+	for iByPhase[lastPhase] < n {
+		dt := float64(iSum*stride+thd) * opPeriod * float64(time.Second)
 		targt := tbase.Add(time.Duration(dt))
 		now := time.Now()
 		if targt.After(now) {
 			gap := targt.Sub(now)
-			glog.V(4).Infof("For (%d,%d,%d) in thread %d, target time is %s, now is %s; sleeping %s\n", iCreate, iUpdate, iDelete, thd, targt, now, gap)
+			glog.V(4).Infof("For %#v in thread %d, target time is %s, now is %s; sleeping %s\n", iByPhase, thd, targt, now, gap)
 			time.Sleep(gap)
 		} else {
-			glog.V(4).Infof("For (%d,%d,%d) in thread %d, target time is %s, now is %s; no sleep\n", iCreate, iUpdate, iDelete, thd, targt, now)
+			glog.V(4).Infof("For %#v in thread %d, target time is %s, now is %s; no sleep\n", iByPhase, thd, targt, now)
 		}
-		if iUpdate >= iDelete+lag || iUpdate >= n {
-			if iDelete == 0 {
-				glog.V(3).Infof("Thread %d doing first delete\n", thd)
-			}
-			i := iDelete*stride + thd
-			iDelete += 1
-			objname := fmt.Sprintf(namefmt, runID, i)
-			/* delete the object */
-			delopts := &metav1.DeleteOptions{}
-			t30 := time.Now()
-			err := clientset.CoreV1().ConfigMaps(namespace).Delete(objname, delopts)
-			t3f := time.Now()
-			writelog("delete", objname, t30, t3f, csvFile, err)
-			if err != nil {
-				atomic.AddInt64(&deleteErrors, 1)
-			}
-		} else if iCreate >= iUpdate+lag || iCreate >= n {
-			if iUpdate == 0 {
-				glog.V(3).Infof("Thread %d doing first update\n", thd)
-			}
-			i := iUpdate*stride + thd
-			iUpdate += 1
-			objname := fmt.Sprintf(namefmt, runID, i)
-			/* Update the object */
-			t20 := time.Now()
-			t20s := t20.Format(CreateTimestampLayout)
-			delta := fmt.Sprintf(`{"data": {"baz": "zab"}, "metadata": {"annotations": {%q: %q}}}`, UpdateTimestampAnnotation, t20s)
-			_, err := clientset.CoreV1().ConfigMaps(namespace).Patch(objname, types.StrategicMergePatchType, []byte(delta), "")
-			t2f := time.Now()
-			writelog("update", objname, t20, t2f, csvFile, err)
-			if err != nil {
-				atomic.AddInt64(&updateErrors, 1)
-			}
-		} else {
-			i := iCreate*stride + thd
-			if iCreate%1000 == 0 {
-				glog.V(3).Infof("Thread %d creating object %d\n", thd, i)
-			}
-			iCreate += 1
-			objname := fmt.Sprintf(namefmt, runID, i)
-			/* create the object */
-			t10 := time.Now()
+		phase := lastPhase
+		for ; phase > 0 && iByPhase[phase-1] < iByPhase[phase]+lag && iByPhase[phase-1] < n; phase-- {
+		}
+		if iByPhase[phase] == 0 {
+			glog.V(3).Infof("Thread %d doing first at phase %d\n", thd, phase)
+		}
+		i := iByPhase[phase]*stride + thd
+		iByPhase[phase] += 1
+		iSum += 1
+		objname := fmt.Sprintf(namefmt, runID, i)
+		ti0 := time.Now()
+		if phase == 0 {
 			obj := &kubecorev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        objname,
 					Namespace:   namespace,
 					Labels:      map[string]string{"purpose": "scaletest"},
-					Annotations: map[string]string{CreateTimestampAnnotation: t10.Format(CreateTimestampLayout)},
+					Annotations: map[string]string{CreateTimestampAnnotation: ti0.Format(CreateTimestampLayout)},
 				},
-				Data: map[string]string{"foo": "bar"},
+				Data: map[string]string{"foo": createValue},
 			}
 			var err error
 			var result kubecorev1.ConfigMap
@@ -271,7 +262,7 @@ func RunThread(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID
 					Namespace(namespace).
 					Resource("configmaps").
 					Param("timeoutSeconds", "17").
-					Param("i", fmt.Sprintf("%d", i)).
+					Param("nm", objname).
 					//	VersionedParams(
 					//		&metav1.ListOptions{TimeoutSeconds: &toSecs},
 					//		scheme.ParameterCodec).
@@ -281,10 +272,27 @@ func RunThread(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID
 			} else {
 				_, err = clientset.CoreV1().ConfigMaps(namespace).Create(obj)
 			}
-			t1f := time.Now()
-			writelog("create", obj.Name, t10, t1f, csvFile, err)
+			tif := time.Now()
+			writelog("create", obj.Name, ti0, tif, csvFile, err)
 			if err != nil {
 				atomic.AddInt64(&createErrors, 1)
+			}
+		} else if phase < lastPhase {
+			ti0s := ti0.Format(CreateTimestampLayout)
+			delta := fmt.Sprintf(`{"data": {"baz": %q}, "metadata": {"annotations": {%q: %q}}}`, updateValue, UpdateTimestampAnnotation, ti0s)
+			_, err := clientset.CoreV1().ConfigMaps(namespace).Patch(objname, types.StrategicMergePatchType, []byte(delta))
+			tif := time.Now()
+			writelog("update", objname, ti0, tif, csvFile, err)
+			if err != nil {
+				atomic.AddInt64(&updateErrors, 1)
+			}
+		} else {
+			delopts := &metav1.DeleteOptions{}
+			err := clientset.CoreV1().ConfigMaps(namespace).Delete(objname, delopts)
+			tif := time.Now()
+			writelog("delete", objname, ti0, tif, csvFile, err)
+			if err != nil {
+				atomic.AddInt64(&deleteErrors, 1)
 			}
 		}
 	}
