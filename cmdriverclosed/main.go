@@ -1,8 +1,10 @@
 package main
 
 import (
+	"crypto/sha256"
 	"flag"
 	"fmt"
+	"io"
 	"math"
 	"math/rand"
 	"os"
@@ -98,6 +100,25 @@ func main() {
 		glog.Errorf("Failed to create parameter file named %q: %s\n", parmFileName, err)
 		os.Exit(10)
 	}
+	myEx, err := os.Executable()
+	if err != nil {
+		glog.Warningf("os.Executable() threw %#+v\n", err)
+	} else {
+		myExF, err := os.Open(myEx)
+		if err != nil {
+			glog.Warningf("os.Open(%q) threw %#+v\n", err)
+		} else {
+			defer myExF.Close()
+			hasher := sha256.New()
+			_, err = io.Copy(hasher, myExF)
+			if err != nil {
+				glog.Warning("io.Copy threw %#+v\n", err)
+			} else {
+				hash := hasher.Sum(nil)
+				parmFile.WriteString(fmt.Sprintf("PROG_SHA256=\"%x\"\n", hash))
+			}
+		}
+	}
 	parmFile.WriteString(fmt.Sprintf("KUBECONFIG=%q\n", *kubeconfigPath))
 	parmFile.WriteString(fmt.Sprintf("N=%d\n", *n))
 	parmFile.WriteString(fmt.Sprintf("MAXPOP=%d\n", *maxPop))
@@ -106,7 +127,7 @@ func main() {
 	parmFile.WriteString(fmt.Sprintf("RATE=%g\n", *targetRate))
 	parmFile.WriteString(fmt.Sprintf("UPDATES=%d\n", *updates))
 	parmFile.WriteString(fmt.Sprintf("CREATE_VALUE_LENGTH=%d\n", *createValueLength))
-	parmFile.WriteString(fmt.Sprintf("UPDATE_VALUE_LENGTH=%g\n", *updateValueLength))
+	parmFile.WriteString(fmt.Sprintf("UPDATE_VALUE_LENGTH=%d\n", *updateValueLength))
 	parmFile.WriteString(fmt.Sprintf("DATAFILENAME=%q\n", *dataFilename))
 	parmFile.WriteString(fmt.Sprintf("RUNID=%q\n", *runID))
 	parmFile.WriteString(fmt.Sprintf("SEED=%d\n", *seed))
