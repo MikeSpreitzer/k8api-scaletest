@@ -22,6 +22,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -29,6 +30,7 @@ import (
 
 	//	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	//	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -80,6 +82,9 @@ type Controller struct {
 
 	// Counters for unusual events
 	updateCounter, strangeCounter *prometheus.CounterVec
+
+	// Guage for ResourceVersion
+	rvGauge prometheus.Gauge
 
 	sync.Mutex
 
@@ -186,6 +191,22 @@ func NewController(queue workqueue.RateLimitingInterface, informer cache.Control
 	} else {
 		strangeCounter.With(prometheus.Labels{"logger": myAddr}).Add(0)
 	}
+
+	rvGauge := prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace:   HistogramNamespace,
+			Subsystem:   HistogramSubsystem,
+			Name:        "resourceVersion",
+			Help:        "latest ResourceVersion observed",
+			ConstLabels: map[string]string{"logger": myAddr},
+		})
+	if err := prometheus.Register(rvGauge); err != nil {
+		glog.Error(err)
+		rvGauge = nil
+	} else {
+		rvGauge.Set(0)
+	}
+
 	return &Controller{
 		myAddr:                 myAddr,
 		informer:               informer,
@@ -196,6 +217,7 @@ func NewController(queue workqueue.RateLimitingInterface, informer cache.Control
 		updateLatencyHistogram: updateHistogram,
 		updateCounter:          updateCounter,
 		strangeCounter:         strangeCounter,
+		rvGauge:                rvGauge,
 		objects:                make(map[string]*ObjectData),
 	}
 }
@@ -359,6 +381,31 @@ func (c *Controller) runWorker() {
 	}
 }
 
+func (c *Controller) ObserveResourceVersion(obj interface{}) {
+	switch o := obj.(type) {
+	case cache.DeletedFinalStateUnknown:
+		glog.V(5).Infof("Recursing for %#+v @ %#p\n", obj, obj)
+		c.ObserveResourceVersion(o.Obj)
+	case cache.ExplicitKey:
+		glog.V(5).Infof("Got ExplicitKey %q\n", o)
+		return
+	default:
+		meta, err := apimeta.Accessor(obj)
+		if err != nil {
+			glog.V(5).Infof("apimeta.Accessor(%#+v) threw %#+v\n", obj, err)
+			return
+		}
+		rvS := meta.GetResourceVersion()
+		rvU, err := strconv.ParseUint(rvS, 10, 64)
+		if err != nil {
+			glog.V(5).Infof("Error parsing ResourceVersion %q of %#+v: %#+v\n", rvS, obj, err)
+		} else {
+			glog.V(5).Infof("Observing ResourceVersion %d of %#+v @ %#p\n", rvU, obj, obj)
+			c.rvGauge.Set(float64(rvU))
+		}
+	}
+}
+
 func main() {
 	var kubeconfig string
 	var master string
@@ -410,7 +457,8 @@ func main() {
 	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			now := time.Now()
-			glog.V(4).Infof("ADD %+v\n", obj)
+			glog.V(4).Infof("ADD %+v @ %#p\n", obj, obj)
+			controller.ObserveResourceVersion(obj)
 			key, err := cache.MetaNamespaceKeyFunc(obj)
 			if err == nil {
 				od := controller.getObjectData(key, true, false)
@@ -426,9 +474,10 @@ func main() {
 				glog.Errorf("Failed to parse key from obj %#v: %v\n", obj, err)
 			}
 		},
-		UpdateFunc: func(obj interface{}, newobj interface{}) {
+		UpdateFunc: func(oldobj interface{}, newobj interface{}) {
 			now := time.Now()
-			glog.V(4).Infof("UPDATE %#v\n", newobj)
+			glog.V(4).Infof("UPDATE %#v @ %#p\n", newobj, newobj)
+			controller.ObserveResourceVersion(newobj)
 			key, err := cache.MetaNamespaceKeyFunc(newobj)
 			if err == nil {
 				od := controller.getObjectData(key, true, false)
@@ -446,7 +495,8 @@ func main() {
 		},
 		DeleteFunc: func(obj interface{}) {
 			now := time.Now()
-			glog.V(4).Infof("DELETE %#v\n", obj)
+			glog.V(4).Infof("DELETE %#v @ %#p\n", obj, obj)
+			controller.ObserveResourceVersion(obj)
 			// IndexerInformer uses a delta queue, therefore for deletes we have to use this
 			// key function.
 			key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
