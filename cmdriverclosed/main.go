@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -45,6 +47,7 @@ var maxPop = flag.Uint64("maxpop", 100, "Maximum object population in system")
 var conns = flag.Int("conns", 0, "Number of connections to use; 0 means to use all the endpoints of the kubernetes service")
 var threads = flag.Uint64("threads", 1, "Total number of threads to use")
 var targetRate = flag.Float64("rate", 100, "Target aggregate rate, in ops/sec")
+var namePadLength = flag.Uint("name-pad-length", 0, "number of extra characters in object name")
 var createValueLength = flag.Int("create-value-length", 100, "Length of data value in create operation")
 var updateValueLength = flag.Int("update-value-length", 100, "Length of data value in update operation")
 var updates = flag.Uint64("updates", 1, "number of updates in one object's lifecycle")
@@ -58,6 +61,10 @@ func main() {
 
 	flag.Set("logtostderr", "true")
 	flag.Parse()
+
+	if *updateValueLength < 10 {
+		*updateValueLength = 10
+	}
 
 	if *runID == "" {
 		now := time.Now()
@@ -126,6 +133,7 @@ func main() {
 	parmFile.WriteString(fmt.Sprintf("THREADS=%d\n", *threads))
 	parmFile.WriteString(fmt.Sprintf("RATE=%g\n", *targetRate))
 	parmFile.WriteString(fmt.Sprintf("UPDATES=%d\n", *updates))
+	parmFile.WriteString(fmt.Sprintf("NAME_PAD_LENGTH=%d\n", *namePadLength))
 	parmFile.WriteString(fmt.Sprintf("CREATE_VALUE_LENGTH=%d\n", *createValueLength))
 	parmFile.WriteString(fmt.Sprintf("UPDATE_VALUE_LENGTH=%d\n", *updateValueLength))
 	parmFile.WriteString(fmt.Sprintf("DATAFILENAME=%q\n", *dataFilename))
@@ -178,6 +186,8 @@ func main() {
 		panic(err)
 	}
 
+	deltaFmt := fmt.Sprintf(`{"data": {"baz": "%%0%dd"}, "metadata": {"annotations": {%q: %%q}}}`, *updateValueLength, UpdateTimestampAnnotation)
+
 	fmt.Printf("DEBUG: Creating %d objects\n", *n)
 	fmt.Printf("DEBUG: maxpop = %d\n", *maxPop)
 	fmt.Printf("DEBUG: endpoints are %v\n", endpoints)
@@ -185,20 +195,23 @@ func main() {
 	fmt.Printf("DEBUG: THREADS = %d\n", *threads)
 	fmt.Printf("DEBUG: RATE = %g/sec\n", *targetRate)
 	fmt.Printf("DEBUG: UPDATES = %d\n", *updates)
+	fmt.Printf("DEBUG: NamePadLength = %d\n", *namePadLength)
 	fmt.Printf("DEBUG: CreateValueLength = %d\n", *createValueLength)
 	fmt.Printf("DEBUG: UpdateValueLength = %d\n", *updateValueLength)
+	fmt.Printf("DEBUG: deltaFmt = `%s`\n", deltaFmt)
 	createValue := ""
 	if *createValueLength > 0 {
 		createValue = strings.Repeat("X", *createValueLength)
 	}
-	updateValue := ""
-	if *updateValueLength > 0 {
-		updateValue = strings.Repeat("Y", *updateValueLength)
-	}
 	opPeriod := 1 / *targetRate
 	fmt.Printf("DEBUG: op period = %g sec\n", opPeriod)
-	digits := int(1 + math.Floor(math.Log10(float64(*n))))
-	namefmt := fmt.Sprintf("%%s-%%0%dd", digits)
+	digits := uint(1 + math.Floor(math.Log10(float64(*n))))
+	totalNameLength := uint(len(*runID)) + 1 + digits + *namePadLength
+	if totalNameLength > 253 {
+		glog.Errorf("Total name length %d is too long (limit is 253)\n", totalNameLength)
+		os.Exit(17)
+	}
+	namefmt := fmt.Sprintf("%%s-%%0%dd", digits+*namePadLength)
 	t0 := time.Now()
 	glog.V(2).Infof("t0 = %s\n", t0)
 	var wg sync.WaitGroup
@@ -213,7 +226,7 @@ func main() {
 				lag = 1
 			}
 			numHere := (*n + thd) / (*threads)
-			RunThread(clientsets[thd%uint64(*conns)], csvFile, namefmt, *runID, createValue, updateValue, t0, *updates, numHere, lag, thd+1, *threads, opPeriod)
+			RunThread(clientsets[thd%uint64(*conns)], csvFile, namefmt, *runID, createValue, deltaFmt, t0, *updates, numHere, lag, thd+1, *threads, opPeriod)
 		}(i)
 	}
 	glog.V(2).Info("waiting for threads to finish\n")
@@ -223,9 +236,11 @@ func main() {
 	dts := dt.Seconds()
 	rate := float64(2+*updates) * float64(*n) / dts
 	glog.Infof("%d object lifecycles in %g seconds = %g writes/sec, with %d errors on create, %d on update, and %d on delete\n", *n, dts, rate, createErrors, updateErrors, deleteErrors)
+	glog.Infof("Length of a created object = %d, length of an updated object = %d\n", createdObjLen, updatedObjLen)
 }
 
 var createErrors, updateErrors, deleteErrors int64
+var createdObjLen, updatedObjLen int
 
 /* =============================================== */
 /* simulate the lifecycles of one thread's objects */
@@ -237,7 +252,7 @@ const hackTimeout = false
 // lag between phases.  The objects are numbered thd, thd+stride,
 // thd+2*stride, and so on.
 
-func RunThread(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID, createValue, updateValue string, tbase time.Time, updates, n, lag, thd, stride uint64, opPeriod float64) {
+func RunThread(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID, createValue, deltaFmt string, tbase time.Time, updates, n, lag, thd, stride uint64, opPeriod float64) {
 	glog.V(3).Infof("Thread %d creating %d objects with lag %d, stride %d, clientset %p\n", thd, n, lag, stride, clientset)
 	var iByPhase []uint64 = make([]uint64, 2+updates)
 	var iSum uint64
@@ -275,11 +290,13 @@ func RunThread(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID
 				Data: map[string]string{"foo": createValue},
 			}
 			var err error
-			var result kubecorev1.ConfigMap
+			var retObj *kubecorev1.ConfigMap
 			if hackTimeout {
+				var result kubecorev1.ConfigMap
+				retObj = &result
 				cv1 := clientset.CoreV1().(*corev1.CoreV1Client)
 				rc := cv1.RESTClient()
-				rc.Post().
+				err = rc.Post().
 					Namespace(namespace).
 					Resource("configmaps").
 					Param("timeoutSeconds", "17").
@@ -289,23 +306,43 @@ func RunThread(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID
 					//		scheme.ParameterCodec).
 					Body(obj).
 					Do().
-					Into(&result)
+					Into(retObj)
 			} else {
-				_, err = clientset.CoreV1().ConfigMaps(namespace).Create(obj)
+				retObj, err = clientset.CoreV1().ConfigMaps(namespace).Create(obj)
 			}
 			tif := time.Now()
 			writelog("create", obj.Name, ti0, tif, csvFile, err)
 			if err != nil {
 				atomic.AddInt64(&createErrors, 1)
+			} else if i == 1 {
+				var obuf bytes.Buffer
+				encoder := json.NewEncoder(&obuf)
+				encoder.SetIndent("", "")
+				err = encoder.Encode(retObj)
+				if err != nil {
+					glog.Warningf("Encoding returned object %#+v threw %#+v\n", retObj, err)
+				} else {
+					createdObjLen = obuf.Len()
+				}
 			}
 		} else if phase < lastPhase {
 			ti0s := ti0.Format(CreateTimestampLayout)
-			delta := fmt.Sprintf(`{"data": {"baz": %q}, "metadata": {"annotations": {%q: %q}}}`, updateValue, UpdateTimestampAnnotation, ti0s)
-			_, err := clientset.CoreV1().ConfigMaps(namespace).Patch(objname, types.StrategicMergePatchType, []byte(delta))
+			delta := fmt.Sprintf(deltaFmt, phase, ti0s)
+			retObj, err := clientset.CoreV1().ConfigMaps(namespace).Patch(objname, types.StrategicMergePatchType, []byte(delta))
 			tif := time.Now()
 			writelog("update", objname, ti0, tif, csvFile, err)
 			if err != nil {
 				atomic.AddInt64(&updateErrors, 1)
+			} else if i == 1 && phase == 1 {
+				var obuf bytes.Buffer
+				encoder := json.NewEncoder(&obuf)
+				encoder.SetIndent("", "")
+				err = encoder.Encode(retObj)
+				if err != nil {
+					glog.Warningf("Encoding returned object %#+v threw %#+v\n", retObj, err)
+				} else {
+					updatedObjLen = obuf.Len()
+				}
 			}
 		} else {
 			delopts := &metav1.DeleteOptions{}
