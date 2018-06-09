@@ -1,9 +1,7 @@
 package main
 
 import (
-	"bytes"
 	"crypto/sha256"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -236,7 +234,7 @@ func main() {
 	dts := dt.Seconds()
 	rate := float64(2+*updates) * float64(*n) / dts
 	glog.Infof("%d object lifecycles in %g seconds = %g writes/sec, with %d errors on create, %d on update, and %d on delete\n", *n, dts, rate, createErrors, updateErrors, deleteErrors)
-	glog.Infof("Length of a created object = %d, length of an updated object = %d\n", createdObjLen, updatedObjLen)
+	glog.Infof("Protobuf length of a created object = %d, protobuf length of an updated object = %d\n", createdObjLen, updatedObjLen)
 }
 
 var createErrors, updateErrors, deleteErrors int64
@@ -315,14 +313,13 @@ func RunThread(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID
 			if err != nil {
 				atomic.AddInt64(&createErrors, 1)
 			} else if i == 1 {
-				var obuf bytes.Buffer
-				encoder := json.NewEncoder(&obuf)
-				encoder.SetIndent("", "")
-				err = encoder.Encode(retObj)
+				var buf []byte
+				var err error
+				buf, err = retObj.Marshal()
 				if err != nil {
-					glog.Warningf("Encoding returned object %#+v threw %#+v\n", retObj, err)
+					glog.Warningf("Marshaling returned object %#+v threw %#+v\n", retObj, err)
 				} else {
-					createdObjLen = obuf.Len()
+					createdObjLen = len(buf)
 				}
 			}
 		} else if phase < lastPhase {
@@ -334,14 +331,13 @@ func RunThread(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID
 			if err != nil {
 				atomic.AddInt64(&updateErrors, 1)
 			} else if i == 1 && phase == 1 {
-				var obuf bytes.Buffer
-				encoder := json.NewEncoder(&obuf)
-				encoder.SetIndent("", "")
-				err = encoder.Encode(retObj)
+				var buf []byte
+				var err error
+				buf, err = retObj.Marshal()
 				if err != nil {
-					glog.Warningf("Encoding returned object %#+v threw %#+v\n", retObj, err)
+					glog.Warningf("Marshaling returned object %#+v threw %#+v\n", retObj, err)
 				} else {
-					updatedObjLen = obuf.Len()
+					updatedObjLen = len(buf)
 				}
 			}
 		} else {

@@ -28,7 +28,7 @@ import (
 
 	"github.com/golang/glog"
 
-	//	corev1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	//	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -69,6 +69,7 @@ const (
 
 type Controller struct {
 	myAddr   string
+	compare  bool
 	queue    workqueue.RateLimitingInterface
 	informer cache.Controller
 	lister   corev1listers.ConfigMapLister
@@ -82,6 +83,7 @@ type Controller struct {
 
 	// Counters for unusual events
 	updateCounter, strangeCounter *prometheus.CounterVec
+	duplicateCounter              prometheus.Counter
 
 	// Guage for ResourceVersion
 	rvGauge prometheus.Gauge
@@ -96,6 +98,7 @@ type ObjectData struct {
 	sync.Mutex
 	actuallyExists bool
 	ObjectQueueData
+	lastSeen *corev1.ConfigMap
 }
 
 // ObjectQueueData says what has happened since the last time
@@ -124,7 +127,7 @@ func (c *Controller) getObjectData(key string, addIfMissing, deleteIfPresent boo
 	return od
 }
 
-func NewController(queue workqueue.RateLimitingInterface, informer cache.Controller, lister corev1listers.ConfigMapLister, csvFilename, myAddr string) *Controller {
+func NewController(queue workqueue.RateLimitingInterface, informer cache.Controller, lister corev1listers.ConfigMapLister, compare bool, csvFilename, myAddr string) *Controller {
 	createHistogram := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: HistogramNamespace,
@@ -192,6 +195,21 @@ func NewController(queue workqueue.RateLimitingInterface, informer cache.Control
 		strangeCounter.With(prometheus.Labels{"logger": myAddr}).Add(0)
 	}
 
+	duplicateCounter := prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace:   HistogramNamespace,
+			Subsystem:   HistogramSubsystem,
+			Name:        "duplicates",
+			Help:        "number of duplicates dequeued",
+			ConstLabels: map[string]string{"logger": myAddr},
+		})
+	if err := prometheus.Register(duplicateCounter); err != nil {
+		glog.Error(err)
+		duplicateCounter = nil
+	} else {
+		duplicateCounter.Add(0)
+	}
+
 	rvGauge := prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace:   HistogramNamespace,
@@ -203,12 +221,11 @@ func NewController(queue workqueue.RateLimitingInterface, informer cache.Control
 	if err := prometheus.Register(rvGauge); err != nil {
 		glog.Error(err)
 		rvGauge = nil
-	} else {
-		rvGauge.Set(0)
 	}
 
 	return &Controller{
 		myAddr:                 myAddr,
+		compare:                compare,
 		informer:               informer,
 		queue:                  queue,
 		lister:                 lister,
@@ -217,6 +234,7 @@ func NewController(queue workqueue.RateLimitingInterface, informer cache.Control
 		updateLatencyHistogram: updateHistogram,
 		updateCounter:          updateCounter,
 		strangeCounter:         strangeCounter,
+		duplicateCounter:       duplicateCounter,
 		rvGauge:                rvGauge,
 		objects:                make(map[string]*ObjectData),
 	}
@@ -260,10 +278,15 @@ func (c *Controller) logDequeue(key string) error {
 		creationTime = obj.ObjectMeta.CreationTimestamp.Time
 	}
 	var oqd ObjectQueueData
+	var lastSeen *corev1.ConfigMap
 	func() {
 		od.Lock()
 		defer od.Unlock()
 		oqd = od.ObjectQueueData
+		if c.compare {
+			lastSeen = od.lastSeen
+			od.lastSeen = obj.DeepCopy()
+		}
 		if desireExist {
 			if od.actuallyExists {
 				op = "update"
@@ -275,12 +298,23 @@ func (c *Controller) logDequeue(key string) error {
 		}
 	}()
 
+	var diff int
+	if c.compare {
+		if ConfigMapQuickEqual(lastSeen, obj) {
+			diff = 2
+			c.duplicateCounter.Add(1)
+		} else {
+			diff = 3
+		}
+	}
+
 	// Log it
 	if c.csvFile != nil {
-		_, err = c.csvFile.Write([]byte(fmt.Sprintf("%s,%s,%q,%s,%d,%d,%d,%s,%s\n",
+		_, err = c.csvFile.Write([]byte(fmt.Sprintf("%s,%s,%q,%s,%d,%d,%d,%s,%s,%d\n",
 			formatTime(now), op, key, formatTimeNoMillis(creationTime),
 			oqd.queuedAdds, oqd.queuedUpdates, oqd.queuedDeletes,
 			formatTime(oqd.firstEnqueue), formatTime(oqd.lastEnqueue),
+			diff,
 		)))
 		if err != nil {
 			runtime.HandleError(fmt.Errorf("Error writing to CSV file named %q: %+v", c.csvFilename, err))
@@ -412,12 +446,14 @@ func main() {
 	var useProtobuf bool
 	var dataFilename string
 	var numThreads int
+	var noCompare bool
 
 	flag.StringVar(&kubeconfig, "kubeconfig", "", "absolute path to the kubeconfig file")
 	flag.StringVar(&master, "master", "", "master url")
 	flag.BoolVar(&useProtobuf, "useProtobuf", false, "indicates whether to encode objects with protobuf (as opposed to JSON)")
 	flag.StringVar(&dataFilename, "data-filname", "/tmp/obj-log.csv", "name of CSV file to create")
 	flag.IntVar(&numThreads, "threads", 1, "number of worker threads")
+	flag.BoolVar(&noCompare, "no-compare", false, "omit comparing object values")
 	flag.Set("logtostderr", "true")
 	flag.Parse()
 
@@ -426,6 +462,9 @@ func main() {
 	if err != nil {
 		glog.Fatal(err)
 	}
+	glog.Infof("Config.Host=%q\n", config.Host)
+	glog.Infof("Config.APIPath=%q\n", config.APIPath)
+	glog.Infof("Config.Prefix=%q\n", config.Prefix)
 	myAddr := GetHostAddr()
 	glog.Infof("Using %s as my host address\n", myAddr)
 	config.UserAgent = fmt.Sprintf("obj-logger@%s", myAddr)
@@ -448,7 +487,7 @@ func main() {
 	// create the workqueue
 	queue := workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
 
-	controller := NewController(queue, informer, lister, dataFilename, myAddr)
+	controller := NewController(queue, informer, lister, !noCompare, dataFilename, myAddr)
 
 	// Bind the workqueue to a cache with the help of an informer. This way we make sure that
 	// whenever the cache is updated, the object key is added to the workqueue.
@@ -544,4 +583,35 @@ func formatTimeNoMillis(t time.Time) string {
 	Y, M, D := t.Date()
 	h, m, s := t.Clock()
 	return fmt.Sprintf("%d-%02d-%02d %02d:%02d:%02d", Y, M, D, h, m, s)
+}
+
+func ConfigMapQuickEqual(x, y *corev1.ConfigMap) bool {
+	if x == y {
+		return true
+	}
+	if x == nil || y == nil {
+		return false
+	}
+	return x.Name == y.Name && x.Namespace == y.Namespace &&
+		x.UID == y.UID && x.ResourceVersion == y.ResourceVersion &&
+		MapStringStringEqual(x.Data, y.Data) &&
+		MapStringStringEqual(x.Labels, y.Labels) &&
+		MapStringStringEqual(x.Annotations, y.Annotations)
+}
+
+func MapStringStringEqual(x, y map[string]string) bool {
+	if x == nil {
+		return y == nil
+	} else if y == nil {
+		return false
+	}
+	if len(x) != len(y) {
+		return false
+	}
+	for k, v := range x {
+		if y[k] != v {
+			return false
+		}
+	}
+	return true
 }
