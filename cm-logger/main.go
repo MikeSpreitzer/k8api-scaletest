@@ -323,6 +323,10 @@ func (c *Controller) logDequeue(key string) error {
 		glog.V(4).Infof("c.csvFile == nil\n")
 	}
 
+	if diff == 2 {
+		return nil
+	}
+
 	if oqd.queuedAdds+oqd.queuedUpdates+oqd.queuedDeletes != 1 {
 		if c.strangeCounter != nil {
 			c.strangeCounter.
@@ -335,7 +339,7 @@ func (c *Controller) logDequeue(key string) error {
 			Add(1)
 	}
 
-	if op != "delete" && obj != nil && obj.Annotations != nil && diff != 2 {
+	if op != "delete" && obj != nil && obj.Annotations != nil {
 		var ctS string
 		var latencyHistogram *prometheus.HistogramVec
 		if op == "create" {
