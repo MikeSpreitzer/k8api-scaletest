@@ -335,7 +335,7 @@ func (c *Controller) logDequeue(key string) error {
 			Add(1)
 	}
 
-	if op != "delete" && obj != nil && obj.Annotations != nil {
+	if op != "delete" && obj != nil && obj.Annotations != nil && diff != 2 {
 		var ctS string
 		var latencyHistogram *prometheus.HistogramVec
 		if op == "create" {
