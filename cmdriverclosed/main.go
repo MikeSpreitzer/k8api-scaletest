@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -46,6 +47,7 @@ var conns = flag.Int("conns", 0, "Number of connections to use; 0 means to use a
 var threads = flag.Uint64("threads", 1, "Total number of threads to use")
 var targetRate = flag.Float64("rate", 100, "Target aggregate rate, in ops/sec")
 var namePadLength = flag.Uint("name-pad-length", 0, "number of extra characters in object name")
+var hackCreate = flag.Bool("hack-create", false, "User lower level APIs to add ?r=$runID&i=$i to create URL")
 var createValueLength = flag.Int("create-value-length", 100, "Length of data value in create operation")
 var updateValueLength = flag.Int("update-value-length", 100, "Length of data value in update operation")
 var updates = flag.Uint64("updates", 1, "number of updates in one object's lifecycle")
@@ -132,6 +134,7 @@ func main() {
 	parmFile.WriteString(fmt.Sprintf("RATE=%g\n", *targetRate))
 	parmFile.WriteString(fmt.Sprintf("UPDATES=%d\n", *updates))
 	parmFile.WriteString(fmt.Sprintf("NAME_PAD_LENGTH=%d\n", *namePadLength))
+	parmFile.WriteString(fmt.Sprintf("HACK_CREATE=%v\n", *hackCreate))
 	parmFile.WriteString(fmt.Sprintf("CREATE_VALUE_LENGTH=%d\n", *createValueLength))
 	parmFile.WriteString(fmt.Sprintf("UPDATE_VALUE_LENGTH=%d\n", *updateValueLength))
 	parmFile.WriteString(fmt.Sprintf("DATAFILENAME=%q\n", *dataFilename))
@@ -194,9 +197,9 @@ func main() {
 	fmt.Printf("DEBUG: RATE = %g/sec\n", *targetRate)
 	fmt.Printf("DEBUG: UPDATES = %d\n", *updates)
 	fmt.Printf("DEBUG: NamePadLength = %d\n", *namePadLength)
+	fmt.Printf("DEBUG: HackCreate = %v\n", *hackCreate)
 	fmt.Printf("DEBUG: CreateValueLength = %d\n", *createValueLength)
 	fmt.Printf("DEBUG: UpdateValueLength = %d\n", *updateValueLength)
-	fmt.Printf("DEBUG: deltaFmt = `%s`\n", deltaFmt)
 	createValue := ""
 	if *createValueLength > 0 {
 		createValue = strings.Repeat("X", *createValueLength)
@@ -224,7 +227,7 @@ func main() {
 				lag = 1
 			}
 			numHere := (*n + thd) / (*threads)
-			RunThread(clientsets[thd%uint64(*conns)], csvFile, namefmt, *runID, createValue, deltaFmt, t0, *updates, numHere, lag, thd+1, *threads, opPeriod)
+			RunThread(clientsets[thd%uint64(*conns)], csvFile, namefmt, *runID, createValue, deltaFmt, t0, *hackCreate, *updates, numHere, lag, thd+1, *threads, opPeriod)
 		}(i)
 	}
 	glog.V(2).Info("waiting for threads to finish\n")
@@ -244,13 +247,11 @@ var createdObjLen, updatedObjLen int
 /* simulate the lifecycles of one thread's objects */
 /* =============================================== */
 
-const hackTimeout = false
-
 // RunThreads runs n objects through their lifecycle, with the given
 // lag between phases.  The objects are numbered thd, thd+stride,
 // thd+2*stride, and so on.
 
-func RunThread(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID, createValue, deltaFmt string, tbase time.Time, updates, n, lag, thd, stride uint64, opPeriod float64) {
+func RunThread(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID, createValue, deltaFmt string, tbase time.Time, hackCreate bool, updates, n, lag, thd, stride uint64, opPeriod float64) {
 	glog.V(3).Infof("Thread %d creating %d objects with lag %d, stride %d, clientset %p\n", thd, n, lag, stride, clientset)
 	var iByPhase []uint64 = make([]uint64, 2+updates)
 	var iSum uint64
@@ -289,7 +290,7 @@ func RunThread(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID
 			}
 			var err error
 			var retObj *kubecorev1.ConfigMap
-			if hackTimeout {
+			if hackCreate {
 				var result kubecorev1.ConfigMap
 				retObj = &result
 				cv1 := clientset.CoreV1().(*corev1.CoreV1Client)
@@ -297,8 +298,8 @@ func RunThread(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID
 				err = rc.Post().
 					Namespace(namespace).
 					Resource("configmaps").
-					Param("timeoutSeconds", "17").
-					Param("nm", objname).
+					Param("r", runID).
+					Param("i", strconv.FormatUint(i, 10)).
 					//	VersionedParams(
 					//		&metav1.ListOptions{TimeoutSeconds: &toSecs},
 					//		scheme.ParameterCodec).
