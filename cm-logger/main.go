@@ -468,7 +468,6 @@ func main() {
 	}
 	glog.Infof("Config.Host=%q\n", config.Host)
 	glog.Infof("Config.APIPath=%q\n", config.APIPath)
-	glog.Infof("Config.Prefix=%q\n", config.Prefix)
 	myAddr := GetHostAddr()
 	glog.Infof("Using %s as my host address\n", myAddr)
 	config.UserAgent = fmt.Sprintf("obj-logger@%s", myAddr)
