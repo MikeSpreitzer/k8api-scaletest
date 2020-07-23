@@ -1,6 +1,7 @@
 package main
 
 import (
+       "context"
 	"crypto/sha256"
 	"flag"
 	"fmt"
@@ -304,15 +305,16 @@ func RunThread(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID
 					//		&metav1.ListOptions{TimeoutSeconds: &toSecs},
 					//		scheme.ParameterCodec).
 					Body(obj).
-					Do().
+					Do(context.Background()).
 					Into(retObj)
 			} else {
-				retObj, err = clientset.CoreV1().ConfigMaps(namespace).Create(obj)
+				retObj, err = clientset.CoreV1().ConfigMaps(namespace).Create(context.Background(), obj, metav1.CreateOptions{FieldManager: "cmdriverclosed"})
 			}
 			tif := time.Now()
 			writelog("create", obj.Name, ti0, tif, csvFile, err)
 			if err != nil {
 				atomic.AddInt64(&createErrors, 1)
+				glog.V(6).Infof("Create failed: %#+v\n", err)
 			} else if i == 1 {
 				var buf []byte
 				var err error
@@ -326,7 +328,7 @@ func RunThread(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID
 		} else if phase < lastPhase {
 			ti0s := ti0.Format(CreateTimestampLayout)
 			delta := fmt.Sprintf(deltaFmt, phase, ti0s)
-			retObj, err := clientset.CoreV1().ConfigMaps(namespace).Patch(objname, types.StrategicMergePatchType, []byte(delta))
+			retObj, err := clientset.CoreV1().ConfigMaps(namespace).Patch(context.Background(), objname, types.StrategicMergePatchType, []byte(delta), metav1.PatchOptions{FieldManager: "cmdriverclosed"})
 			tif := time.Now()
 			writelog("update", objname, ti0, tif, csvFile, err)
 			if err != nil {
@@ -342,8 +344,8 @@ func RunThread(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID
 				}
 			}
 		} else {
-			delopts := &metav1.DeleteOptions{}
-			err := clientset.CoreV1().ConfigMaps(namespace).Delete(objname, delopts)
+			delopts := metav1.DeleteOptions{}
+			err := clientset.CoreV1().ConfigMaps(namespace).Delete(context.Background(), objname, delopts)
 			tif := time.Now()
 			writelog("delete", objname, ti0, tif, csvFile, err)
 			if err != nil {
