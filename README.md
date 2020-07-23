@@ -105,5 +105,12 @@ ReplicaSet.
 
 ### Dependencies
 
+#### New
+
+Dependencies are managed by go 1.11 modules.  Each piece has its own
+`go.mod` and `go.sum`.
+
+#### Old
+
 The dependencies are kept in `vendor` and managed by Glide.  Use the
 `-v` switch on `glide update` and `glide install`.
