@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    prometheus.io/scrape: 'true'
+    prometheus.io/port: '9101'
+  name: cm-driver
+  namespace: scaletest
+  labels:
+    app: cm-driver
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app: cm-driver
+  ports:
+  - name: prometheus-metrics
+    port: 9101
+    protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cm-driver
+  namespace: scaletest
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cm-driver
+  template:
+    metadata:
+      labels:
+        app: cm-driver
+      name: cm-driver
+    spec:
+      containers:
+      - name: cm-driver
+        image: mspreitz/cmdriver:latest
+        env:
+          - name: KUBECONFIG
+            value: "~/.kube/config"
+        command:  ["/bin/sh", "-c"]
+        args:
+          - sleep 365d
