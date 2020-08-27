@@ -170,7 +170,6 @@ func main() {
 	wg.Wait()
 	glog.Infof("%d logged errors\n", totErrCount)
 
-	time.Sleep(30 * time.Second)
 	// Exit after creating and deleting all obj to terminate the service exporting the prometheus metrics
 	os.Exit(0)
 }
