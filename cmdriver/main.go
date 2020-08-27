@@ -13,6 +13,9 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	"net/http"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/golang/glog"
 
@@ -41,6 +44,7 @@ var dataFilename = flag.String("datafile", "{{.RunID}}-driver.csv", "Name of CSV
 var runID = flag.String("runid", "", "unique ID of this run (default is randomly generated)")
 var seed = flag.Int64("seed", 0, "seed for random numbers (other than runid) (default is based on time)")
 var clientLB = flag.Bool("clientlb", false, "Load balance in this client")
+var metricPort = flag.String("metricport", "9101", "Port to expose prometheus metrics")
 
 var totErrCount uint32 = 0
 
@@ -50,6 +54,8 @@ func main() {
 
 	flag.Set("logtostderr", "true")
 	flag.Parse()
+
+	go exposeMetrics()
 
 	if *runID == "" {
 		now := time.Now()
@@ -163,6 +169,10 @@ func main() {
 	fmt.Printf("DEBUG: waiting for objects to clear\n")
 	wg.Wait()
 	glog.Infof("%d logged errors\n", totErrCount)
+
+	time.Sleep(30 * time.Second)
+	// Exit after creating and deleting all obj to terminate the service exporting the prometheus metrics
+	os.Exit(0)
 }
 
 /* =========================================== */
@@ -265,4 +275,10 @@ func writelog(op string, key string, tBefore, tAfter time.Time, csvFile *os.File
 	}
 	// fmt.Printf("%s,%s,%s,%q,%q\n", formatTime(tBefore), formatTime(tAfter), op, key, errS)
 	csvFile.Write([]byte(fmt.Sprintf("%s,%s,%s,%q,%q\n", formatTime(tBefore), formatTime(tAfter), op, key, errS)))
+}
+
+func exposeMetrics() {
+  http.Handle("/metrics", promhttp.Handler())
+  glog.Infof("starting HTTP server on port :%s\n", *metricPort)
+  glog.Fatal(http.ListenAndServe(":"+*metricPort, nil))
 }

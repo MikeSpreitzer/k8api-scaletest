@@ -13,7 +13,6 @@ import:
   version: ^v9
   subpackages:
   - kubernetes
-  - rest
   - tools/clientcmd
   - util/flowcontrol
 - package: k8s.io/sample-apiserver
@@ -26,3 +25,9 @@ import:
   version: ^0.9
   subpackages:
   - prometheus
+  - prometheus/promhttp
+- package: golang.org/x/sys
+  subpackages:
+  - unix
+- package: github.com/prometheus/procfs
+  version: v0.0.2
