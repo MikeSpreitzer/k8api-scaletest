@@ -1,45 +1,47 @@
-apiVersion: v1
-kind: Service
+apiVersion: batch/v1
+kind: Job
 metadata:
   annotations:
-    prometheus.io/scrape: 'true'
-    prometheus.io/port: '9101'
-  name: cm-driver
-  namespace: scaletest
+    prometheus.io/port: "9101"
+    prometheus.io/scrape: "true"
   labels:
-    app: cm-driver
-spec:
-  type: ClusterIP
-  clusterIP: None
-  selector:
-    app: cm-driver
-  ports:
-  - name: prometheus-metrics
-    port: 9101
-    protocol: TCP
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: cm-driver
+    app: cmdriver
+  name: cmdriver
   namespace: scaletest
 spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: cm-driver
   template:
     metadata:
       labels:
-        app: cm-driver
-      name: cm-driver
+        app: cmdriver
     spec:
       containers:
-      - name: cm-driver
-        image: mspreitz/cmdriver:latest
+      - name: cmdriver
+        image: marceloamaral/cmdriver:latest
+        command:
+          - "/cmdriver"
+          - "-lambda=$(LAMBDA)"
+          - "-maxpop=$(MAXPOP)"
+          - "-n=$(NUM)"
+          - "-log_dir=$(LOGDIR)"
+          - "-waitBeforeTerminate=$(WAITBEFORETERMINATE)"
         env:
-          - name: KUBECONFIG
-            value: "~/.kube/config"
-        command:  ["/bin/sh", "-c"]
-        args:
-          - sleep 365d
+        - name: LAMBDA
+          value: "10"
+        - name: MAXPOP
+          value: "100"
+        - name: NUM
+          value: "300"
+        - name: LOGDIR
+          value: /results
+        - name: WAITBEFORETERMINATE
+          value: "15"
+        ports:
+        - containerPort: 9101
+        volumeMounts:
+        - mountPath: /results
+          name: results
+      restartPolicy: Never
+      volumes:
+      - name: results
+        emptyDir: {}
+
