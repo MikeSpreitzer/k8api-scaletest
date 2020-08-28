@@ -13,6 +13,9 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	"net/http"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/golang/glog"
 
@@ -33,7 +36,7 @@ const (
 	CreateTimestampLayout = "2006-01-02 15:04:05.000 -0700"
 )
 
-var kubeconfigPath = flag.String("kubeconfig", "", "Path to kubeconfig file")
+var kubeconfigPath = flag.String("kubeconfig", "", "Path to kubeconfig file, if empty the in cluster configuration will be used")
 var lambda = flag.Float64("lambda", 1.0, "Rate (1/s) at which new objects are created")
 var n = flag.Int("n", 300, "Total number of objects to create")
 var maxpop = flag.Int("maxpop", 100, "Maximum object population in system")
@@ -41,6 +44,8 @@ var dataFilename = flag.String("datafile", "{{.RunID}}-driver.csv", "Name of CSV
 var runID = flag.String("runid", "", "unique ID of this run (default is randomly generated)")
 var seed = flag.Int64("seed", 0, "seed for random numbers (other than runid) (default is based on time)")
 var clientLB = flag.Bool("clientlb", false, "Load balance in this client")
+var metricPort = flag.String("metricport", "9101", "Port to expose prometheus metrics")
+var waitBeforeTerminate = flag.Int64("waitBeforeTerminate", 0, "Time in seconds to wait before terminate the program to have the metrics scraped by Prometheus")
 
 var totErrCount uint32 = 0
 
@@ -50,6 +55,11 @@ func main() {
 
 	flag.Set("logtostderr", "true")
 	flag.Parse()
+
+	// Start the HTTP server to expose golang prometheus metrics
+	http.Handle("/metrics", promhttp.Handler())
+	glog.Infof("starting HTTP server on port :%s\n", *metricPort)
+	go http.ListenAndServe(":"+*metricPort, nil)
 
 	if *runID == "" {
 		now := time.Now()
@@ -163,6 +173,11 @@ func main() {
 	fmt.Printf("DEBUG: waiting for objects to clear\n")
 	wg.Wait()
 	glog.Infof("%d logged errors\n", totErrCount)
+
+	time.Sleep(time.Duration(*waitBeforeTerminate) * time.Second)
+
+	// Exit after creating and deleting all obj to terminate the service exporting the prometheus metrics
+	os.Exit(0)
 }
 
 /* =========================================== */
