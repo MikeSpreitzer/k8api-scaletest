@@ -44,8 +44,8 @@ var dataFilename = flag.String("datafile", "{{.RunID}}-driver.csv", "Name of CSV
 var runID = flag.String("runid", "", "unique ID of this run (default is randomly generated)")
 var seed = flag.Int64("seed", 0, "seed for random numbers (other than runid) (default is based on time)")
 var clientLB = flag.Bool("clientlb", false, "Load balance in this client")
-var metricPort = flag.String("metricport", "9101", "Port to expose prometheus metrics")
-var waitBeforeTerminate = flag.Int64("waitBeforeTerminate", 0, "Time in seconds to wait before terminate the program to have the metrics scraped by Prometheus")
+var metricPort = flag.String("metricport", "9376", "Port to expose prometheus metrics")
+var waitBeforeTerminate = flag.Int64("waitBeforeTerminate", 15, "Time in seconds to wait before terminate the program to have the metrics scraped by Prometheus")
 
 var totErrCount uint32 = 0
 
