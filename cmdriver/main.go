@@ -59,7 +59,7 @@ func main() {
 	// Start the HTTP server to expose golang prometheus metrics
 	http.Handle("/metrics", promhttp.Handler())
 	glog.Infof("starting HTTP server on port :%s\n", *metricPort)
-	go glog.Fatal(http.ListenAndServe(":"+*metricPort, nil))
+	go http.ListenAndServe(":"+*metricPort, nil)
 
 	if *runID == "" {
 		now := time.Now()
