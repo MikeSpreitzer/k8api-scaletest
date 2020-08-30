@@ -26,7 +26,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/glog"
+	"k8s.io/klog/v2"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -140,7 +140,7 @@ func NewController(queue workqueue.RateLimitingInterface, informer cache.Control
 		[]string{"logger"},
 	)
 	if err := prometheus.Register(createHistogram); err != nil {
-		glog.Error(err)
+		klog.Error(err)
 		createHistogram = nil
 	} else {
 		createHistogram.With(prometheus.Labels{"logger": myAddr}).Observe(0)
@@ -158,7 +158,7 @@ func NewController(queue workqueue.RateLimitingInterface, informer cache.Control
 		[]string{"logger"},
 	)
 	if err := prometheus.Register(updateHistogram); err != nil {
-		glog.Error(err)
+		klog.Error(err)
 		updateHistogram = nil
 	} else {
 		updateHistogram.With(prometheus.Labels{"logger": myAddr}).Observe(0)
@@ -174,7 +174,7 @@ func NewController(queue workqueue.RateLimitingInterface, informer cache.Control
 		[]string{"logger"},
 	)
 	if err := prometheus.Register(updateCounter); err != nil {
-		glog.Error(err)
+		klog.Error(err)
 		updateCounter = nil
 	} else {
 		updateCounter.With(prometheus.Labels{"logger": myAddr}).Add(0)
@@ -189,7 +189,7 @@ func NewController(queue workqueue.RateLimitingInterface, informer cache.Control
 		[]string{"logger"},
 	)
 	if err := prometheus.Register(strangeCounter); err != nil {
-		glog.Error(err)
+		klog.Error(err)
 		strangeCounter = nil
 	} else {
 		strangeCounter.With(prometheus.Labels{"logger": myAddr}).Add(0)
@@ -204,7 +204,7 @@ func NewController(queue workqueue.RateLimitingInterface, informer cache.Control
 			ConstLabels: map[string]string{"logger": myAddr},
 		})
 	if err := prometheus.Register(duplicateCounter); err != nil {
-		glog.Error(err)
+		klog.Error(err)
 		duplicateCounter = nil
 	} else {
 		duplicateCounter.Add(0)
@@ -219,7 +219,7 @@ func NewController(queue workqueue.RateLimitingInterface, informer cache.Control
 			ConstLabels: map[string]string{"logger": myAddr},
 		})
 	if err := prometheus.Register(rvGauge); err != nil {
-		glog.Error(err)
+		klog.Error(err)
 		rvGauge = nil
 	}
 
@@ -320,7 +320,7 @@ func (c *Controller) logDequeue(key string) error {
 			runtime.HandleError(fmt.Errorf("Error writing to CSV file named %q: %+v", c.csvFilename, err))
 		}
 	} else {
-		glog.V(4).Infof("c.csvFile == nil\n")
+		klog.V(4).Infof("c.csvFile == nil\n")
 	}
 
 	if diff == 2 {
@@ -355,7 +355,7 @@ func (c *Controller) logDequeue(key string) error {
 				return nil
 			}
 			latency := now.Sub(clientTime)
-			glog.V(4).Infof("Latency = %v for op=%s, key=%s, now=%s, clientTime=%s, ts=%s\n", latency, op, key, now, clientTime, ctS)
+			klog.V(4).Infof("Latency = %v for op=%s, key=%s, now=%s, clientTime=%s, ts=%s\n", latency, op, key, now, clientTime, ctS)
 			latencyHistogram.
 				With(prometheus.Labels{"logger": c.myAddr}).
 				Observe(latency.Seconds())
@@ -375,7 +375,7 @@ func (c *Controller) handleErr(err error, key interface{}) {
 		return
 	}
 
-	glog.Infof("Error syncing ConfigMap %v: %v", key, err)
+	klog.Infof("Error syncing ConfigMap %v: %v", key, err)
 
 	// Re-enqueue the key rate limited. Based on the rate limiter on the
 	// queue and the re-enqueue history, the key will be processed later again.
@@ -388,7 +388,7 @@ func (c *Controller) Run(threadiness int, stopCh chan struct{}) {
 
 	// Let the workers stop when we are done
 	defer c.queue.ShutDown()
-	glog.Info("Starting Object Logging controller")
+	klog.Info("Starting Object Logging controller")
 
 	csvFile, err := os.Create(c.csvFilename)
 	if err != nil {
@@ -411,7 +411,7 @@ func (c *Controller) Run(threadiness int, stopCh chan struct{}) {
 	}
 
 	<-stopCh
-	glog.Info("Stopping Object Logging controller")
+	klog.Info("Stopping Object Logging controller")
 }
 
 func (c *Controller) runWorker() {
@@ -422,23 +422,23 @@ func (c *Controller) runWorker() {
 func (c *Controller) ObserveResourceVersion(obj interface{}) {
 	switch o := obj.(type) {
 	case cache.DeletedFinalStateUnknown:
-		glog.V(5).Infof("Recursing for %#+v @ %#p\n", obj, obj)
+		klog.V(5).Infof("Recursing for %#+v @ %#p\n", obj, obj)
 		c.ObserveResourceVersion(o.Obj)
 	case cache.ExplicitKey:
-		glog.V(5).Infof("Got ExplicitKey %q\n", o)
+		klog.V(5).Infof("Got ExplicitKey %q\n", o)
 		return
 	default:
 		meta, err := apimeta.Accessor(obj)
 		if err != nil {
-			glog.V(5).Infof("apimeta.Accessor(%#+v) threw %#+v\n", obj, err)
+			klog.V(5).Infof("apimeta.Accessor(%#+v) threw %#+v\n", obj, err)
 			return
 		}
 		rvS := meta.GetResourceVersion()
 		rvU, err := strconv.ParseUint(rvS, 10, 64)
 		if err != nil {
-			glog.V(5).Infof("Error parsing ResourceVersion %q of %#+v: %#+v\n", rvS, obj, err)
+			klog.V(5).Infof("Error parsing ResourceVersion %q of %#+v: %#+v\n", rvS, obj, err)
 		} else {
-			glog.V(5).Infof("Observing ResourceVersion %d of %#+v @ %#p\n", rvU, obj, obj)
+			klog.V(5).Infof("Observing ResourceVersion %d of %#+v @ %#p\n", rvU, obj, obj)
 			c.rvGauge.Set(float64(rvU))
 		}
 	}
@@ -452,6 +452,7 @@ func main() {
 	var numThreads int
 	var noCompare bool
 
+	klog.InitFlags(nil)
 	flag.StringVar(&kubeconfig, "kubeconfig", "", "absolute path to the kubeconfig file")
 	flag.StringVar(&master, "master", "", "master url")
 	flag.BoolVar(&useProtobuf, "useProtobuf", false, "indicates whether to encode objects with protobuf (as opposed to JSON)")
@@ -464,12 +465,12 @@ func main() {
 	// creates the connection
 	config, err := clientcmd.BuildConfigFromFlags(master, kubeconfig)
 	if err != nil {
-		glog.Fatal(err)
+		klog.Fatal(err)
 	}
-	glog.Infof("Config.Host=%q\n", config.Host)
-	glog.Infof("Config.APIPath=%q\n", config.APIPath)
+	klog.Infof("Config.Host=%q\n", config.Host)
+	klog.Infof("Config.APIPath=%q\n", config.APIPath)
 	myAddr := GetHostAddr()
-	glog.Infof("Using %s as my host address\n", myAddr)
+	klog.Infof("Using %s as my host address\n", myAddr)
 	config.UserAgent = fmt.Sprintf("obj-logger@%s", myAddr)
 
 	if useProtobuf {
@@ -479,7 +480,7 @@ func main() {
 	// creates the clientset
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		glog.Fatal(err)
+		klog.Fatal(err)
 	}
 
 	informerFactory := informers.NewSharedInformerFactory(clientset, 0)
@@ -499,7 +500,7 @@ func main() {
 	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			now := time.Now()
-			glog.V(4).Infof("ADD %+v @ %#p\n", obj, obj)
+			klog.V(4).Infof("ADD %+v @ %#p\n", obj, obj)
 			controller.ObserveResourceVersion(obj)
 			key, err := cache.MetaNamespaceKeyFunc(obj)
 			if err == nil {
@@ -513,12 +514,12 @@ func main() {
 				od.queuedAdds++
 				queue.Add(key)
 			} else {
-				glog.Errorf("Failed to parse key from obj %#v: %v\n", obj, err)
+				klog.Errorf("Failed to parse key from obj %#v: %v\n", obj, err)
 			}
 		},
 		UpdateFunc: func(oldobj interface{}, newobj interface{}) {
 			now := time.Now()
-			glog.V(4).Infof("UPDATE %#v @ %#p\n", newobj, newobj)
+			klog.V(4).Infof("UPDATE %#v @ %#p\n", newobj, newobj)
 			controller.ObserveResourceVersion(newobj)
 			key, err := cache.MetaNamespaceKeyFunc(newobj)
 			if err == nil {
@@ -532,12 +533,12 @@ func main() {
 				od.queuedUpdates++
 				queue.Add(key)
 			} else {
-				glog.Errorf("Failed to parse key from obj %#v: %v\n", newobj, err)
+				klog.Errorf("Failed to parse key from obj %#v: %v\n", newobj, err)
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			now := time.Now()
-			glog.V(4).Infof("DELETE %#v @ %#p\n", obj, obj)
+			klog.V(4).Infof("DELETE %#v @ %#p\n", obj, obj)
 			controller.ObserveResourceVersion(obj)
 			// IndexerInformer uses a delta queue, therefore for deletes we have to use this
 			// key function.
@@ -553,7 +554,7 @@ func main() {
 				od.queuedDeletes++
 				queue.Add(key)
 			} else {
-				glog.Errorf("Failed to parse key from obj %#v: %v\n", obj, err)
+				klog.Errorf("Failed to parse key from obj %#v: %v\n", obj, err)
 			}
 		},
 	})
@@ -566,7 +567,7 @@ func main() {
 	// Serve Prometheus metrics
 	http.Handle("/metrics", promhttp.Handler())
 	go func() {
-		glog.Error(http.ListenAndServe(MetricsAddr, nil))
+		klog.Error(http.ListenAndServe(MetricsAddr, nil))
 	}()
 
 	// Wait forever

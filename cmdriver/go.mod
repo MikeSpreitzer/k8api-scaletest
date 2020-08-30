@@ -1,4 +1,4 @@
-module github.com/MikeSpreitzer/k8api-scaletest/cm-logger
+module github.com/MikeSpreitzer/k8api-scaletest/cmdriver
 
 go 1.15
 

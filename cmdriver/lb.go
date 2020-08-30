@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -14,7 +15,7 @@ import (
 // (if any) in each EndpointSubset that has the requested protocol.
 // If the address is IPv6 then it gets surrounded by square brackets.
 func GetEndpoints(clientset kubeclient.Interface, serviceName, serviceNS, protocol, scheme string) ([]string, error) {
-	eps, err := clientset.CoreV1().Endpoints(serviceNS).Get(serviceName, metav1.GetOptions{})
+	eps, err := clientset.CoreV1().Endpoints(serviceNS).Get(context.Background(), serviceName, metav1.GetOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("Failed to fetch Endpoints named %q in namespace %q: %s", serviceName, serviceNS, err)
 	}
