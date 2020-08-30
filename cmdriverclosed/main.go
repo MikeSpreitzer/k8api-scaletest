@@ -58,7 +58,7 @@ var seed = flag.Int64("seed", 0, "seed for random numbers (other than runid) (de
 const namespace = "scaletest"
 
 func main() {
-
+	klog.InitFlags(nil)
 	flag.Set("logtostderr", "true")
 	flag.Parse()
 

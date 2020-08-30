@@ -20,13 +20,11 @@ import (
 	"flag"
 	"fmt"
 	"hash/crc64"
-	"math/rand"
 	"io"
+	"math/rand"
 	"os"
 	"sync"
 	"time"
-
-	"github.com/golang/glog"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/runtime"
@@ -34,9 +32,11 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/workqueue"
-	wardleclient "k8s.io/sample-apiserver/pkg/client/clientset/versioned"
-	wardleinformers "k8s.io/sample-apiserver/pkg/client/informers/externalversions"
-	wardlev1a1listers "k8s.io/sample-apiserver/pkg/client/listers/wardle/v1alpha1"
+	"k8s.io/klog/v2"
+
+	wardleclient "k8s.io/sample-apiserver/pkg/generated/clientset/versioned"
+	wardleinformers "k8s.io/sample-apiserver/pkg/generated/informers/externalversions"
+	wardlev1a1listers "k8s.io/sample-apiserver/pkg/generated/listers/wardle/v1alpha1"
 )
 
 type Controller struct {
@@ -159,7 +159,7 @@ func (c *Controller) logDequeue(key string) error {
 			runtime.HandleError(fmt.Errorf("Error writing to CSV file named %q: %+v", c.csvFilename, err))
 		}
 	} else {
-		glog.V(4).Infof("c.csvFile == nil\n")
+		klog.V(4).Infof("c.csvFile == nil\n")
 	}
 
 	return nil
@@ -175,7 +175,7 @@ func (c *Controller) handleErr(err error, key interface{}) {
 		return
 	}
 
-	glog.Infof("Error syncing Flunder %v: %v", key, err)
+	klog.Infof("Error syncing Flunder %v: %v", key, err)
 
 	// Re-enqueue the key rate limited. Based on the rate limiter on the
 	// queue and the re-enqueue history, the key will be processed later again.
@@ -188,7 +188,7 @@ func (c *Controller) Run(threadiness int, stopCh chan struct{}) {
 
 	// Let the workers stop when we are done
 	defer c.queue.ShutDown()
-	glog.Info("Starting Object Logging controller")
+	klog.Info("Starting Object Logging controller")
 
 	csvFile, err := os.Create(c.csvFilename)
 	if err != nil {
@@ -211,7 +211,7 @@ func (c *Controller) Run(threadiness int, stopCh chan struct{}) {
 	}
 
 	<-stopCh
-	glog.Info("Stopping Object Logging controller")
+	klog.Info("Stopping Object Logging controller")
 }
 
 func (c *Controller) runWorker() {
@@ -227,7 +227,7 @@ func main() {
 	var numThreads int
 	var overrideServer string
 	var insecure bool
-
+	klog.InitFlags(nil)
 	flag.StringVar(&kubeconfig, "kubeconfig", "", "absolute path to the kubeconfig file")
 	flag.StringVar(&master, "master", "", "master url")
 	flag.BoolVar(&useProtobuf, "useProtobuf", false, "indicates whether to encode objects with protobuf (as opposed to JSON)")
@@ -238,28 +238,28 @@ func main() {
 	flag.Set("logtostderr", "true")
 	flag.Parse()
 
-	glog.Infof("data-filname=%q, threads=%d\n", dataFilename, numThreads)
+	klog.Infof("data-filname=%q, threads=%d\n", dataFilename, numThreads)
 
 	// creates the connection
 	config, err := clientcmd.BuildConfigFromFlags(master, kubeconfig)
 	if err != nil {
-		glog.Fatal(err)
+		klog.Fatal(err)
 	}
-	glog.V(3).Infof("Config=%#v\n", config)
+	klog.V(3).Infof("Config=%#v\n", config)
 	if insecure {
-		glog.Infof("Skipping verification of server cert\n")
+		klog.Infof("Skipping verification of server cert\n")
 		config.TLSClientConfig.Insecure = true
 		config.TLSClientConfig.CAFile = ""
 		config.TLSClientConfig.CAData = nil
 	}
 	if overrideServer != "" {
-		glog.Infof("Using server %q instead of %q\n", overrideServer, config.Host)
+		klog.Infof("Using server %q instead of %q\n", overrideServer, config.Host)
 		config.Host = overrideServer
 	}
 	myAddr := GetHostAddr()
 	now := time.Now()
 	birthmark := fmt.Sprintf("%02d%02d%02d", now.Hour(), now.Minute(), now.Second())
-	glog.Infof("Using %q as my host address, %q as my birthmark\n", myAddr, birthmark)
+	klog.Infof("Using %q as my host address, %q as my birthmark\n", myAddr, birthmark)
 	crcTable := crc64.MakeTable(crc64.ISO)
 	crc := int64(crc64.Checksum(([]byte)(myAddr), crcTable))
 	rand.Seed(now.UnixNano() + crc)
@@ -274,7 +274,7 @@ func main() {
 	// creates the clientset
 	clientset, err := wardleclient.NewForConfig(config)
 	if err != nil {
-		glog.Fatal(err)
+		klog.Fatal(err)
 	}
 
 	informerFactory := wardleinformers.NewSharedInformerFactory(clientset, 0)
@@ -294,7 +294,7 @@ func main() {
 	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			now := time.Now()
-			glog.V(4).Infof("ADD %+v\n", obj)
+			klog.V(4).Infof("ADD %+v\n", obj)
 			key, err := cache.MetaNamespaceKeyFunc(obj)
 			if err == nil {
 				od := controller.getObjectData(key, true, false)
@@ -307,12 +307,12 @@ func main() {
 				od.queuedAdds++
 				queue.Add(key)
 			} else {
-				glog.Errorf("Failed to parse key from obj %#v: %v\n", obj, err)
+				klog.Errorf("Failed to parse key from obj %#v: %v\n", obj, err)
 			}
 		},
 		UpdateFunc: func(obj interface{}, newobj interface{}) {
 			now := time.Now()
-			glog.V(4).Infof("UPDATE %#v\n", newobj)
+			klog.V(4).Infof("UPDATE %#v\n", newobj)
 			key, err := cache.MetaNamespaceKeyFunc(newobj)
 			if err == nil {
 				od := controller.getObjectData(key, true, false)
@@ -325,12 +325,12 @@ func main() {
 				od.queuedUpdates++
 				queue.Add(key)
 			} else {
-				glog.Errorf("Failed to parse key from obj %#v: %v\n", newobj, err)
+				klog.Errorf("Failed to parse key from obj %#v: %v\n", newobj, err)
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			now := time.Now()
-			glog.V(4).Infof("DELETE %#v\n", obj)
+			klog.V(4).Infof("DELETE %#v\n", obj)
 			// IndexerInformer uses a delta queue, therefore for deletes we have to use this
 			// key function.
 			key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
@@ -345,7 +345,7 @@ func main() {
 				od.queuedDeletes++
 				queue.Add(key)
 			} else {
-				glog.Errorf("Failed to parse key from obj %#v: %v\n", obj, err)
+				klog.Errorf("Failed to parse key from obj %#v: %v\n", obj, err)
 			}
 		},
 	})

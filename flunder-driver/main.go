@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"math"
@@ -13,15 +14,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/golang/glog"
-
-	wardlev1a1 "k8s.io/sample-apiserver/pkg/apis/wardle/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	wardleclient "k8s.io/sample-apiserver/pkg/client/clientset/versioned"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/flowcontrol"
+	"k8s.io/klog/v2"
+
+	wardlev1a1 "k8s.io/sample-apiserver/pkg/apis/wardle/v1alpha1"
+	wardleclient "k8s.io/sample-apiserver/pkg/generated/clientset/versioned"
 )
 
 var kubeconfigPath = flag.String("kubeconfig", "", "Path to kubeconfig file")
@@ -35,7 +36,7 @@ var seed = flag.Int64("seed", 0, "seed for random numbers (other than runid) (de
 const namespace = "scaletest"
 
 func main() {
-
+	klog.InitFlags(nil)
 	flag.Set("logtostderr", "true")
 	flag.Parse()
 
@@ -48,7 +49,7 @@ func main() {
 		h, m, _ := now.Clock()
 		*runID = fmt.Sprintf("%02d%02d.%02d%02d.%04d", M, D, h, m, rand.Intn(10000))
 	} else if good, _ := regexp.MatchString("^[-a-zA-Z0-9!@#$%^&()+=][-a-zA-Z0-9!@#$%^&()+=.]*$", *runID); !good {
-		glog.Errorf("runid %q does not match regular expression ^[-a-zA-Z0-9!@#$%%^&()+=][-a-zA-Z0-9!@#$%%^&()+=.]*$\n", *runID)
+		klog.Errorf("runid %q does not match regular expression ^[-a-zA-Z0-9!@#$%%^&()+=][-a-zA-Z0-9!@#$%%^&()+=.]*$\n", *runID)
 		os.Exit(1)
 	}
 
@@ -58,7 +59,7 @@ func main() {
 
 	*dataFilename = strings.Replace(*dataFilename, "{{.RunID}}", *runID, -1)
 	if good, _ := regexp.MatchString("^[-a-zA-Z0-9!@#$%^&()+=./]+$", *dataFilename); !good {
-		glog.Errorf("data filename %q does not match regular expression ^[-a-zA-Z0-9!@#$%%^&()+=./]+$\n", *dataFilename)
+		klog.Errorf("data filename %q does not match regular expression ^[-a-zA-Z0-9!@#$%%^&()+=./]+$\n", *dataFilename)
 		os.Exit(5)
 	}
 
@@ -69,7 +70,7 @@ func main() {
 	parmFileName := *runID + "-driver.parms"
 	parmFile, err := os.Create(parmFileName)
 	if err != nil {
-		glog.Errorf("Failed to create parameter file named %q: %s\n", parmFileName, err)
+		klog.Errorf("Failed to create parameter file named %q: %s\n", parmFileName, err)
 		os.Exit(10)
 	}
 	parmFile.WriteString(fmt.Sprintf("KUBECONFIG=%q\n", *kubeconfigPath))
@@ -80,7 +81,7 @@ func main() {
 	parmFile.WriteString(fmt.Sprintf("RUNID=%q\n", *runID))
 	parmFile.WriteString(fmt.Sprintf("SEED=%d\n", *seed))
 	if err = parmFile.Close(); err != nil {
-		glog.Errorf("Failed to close parameter file named %q: %s\n", parmFileName, err)
+		klog.Errorf("Failed to close parameter file named %q: %s\n", parmFileName, err)
 		os.Exit(11)
 	}
 	fmt.Printf("RunID is %s\n", *runID)
@@ -89,14 +90,14 @@ func main() {
 	/* connect to the API server */
 	config, err := getClientConfig(*kubeconfigPath)
 	if err != nil {
-		glog.Errorf("Unable to get kube client config: %s", err)
+		klog.Errorf("Unable to get kube client config: %s", err)
 		os.Exit(20)
 	}
 	config.RateLimiter = flowcontrol.NewFakeAlwaysRateLimiter()
 
 	clientset, err := wardleclient.NewForConfig(config)
 	if err != nil {
-		glog.Error("Failed to create a clientset: %s\n", err)
+		klog.Error("Failed to create a clientset: %s\n", err)
 		os.Exit(21)
 	}
 
@@ -147,7 +148,7 @@ func RunObjLifeCycle(clientset *wardleclient.Clientset, csvFile *os.File, objnam
 		},
 	}
 	t10 := time.Now()
-	_, err = clientset.WardleV1alpha1().Flunders(namespace).Create(obj)
+	_, err = clientset.WardleV1alpha1().Flunders(namespace).Create(context.Background(), obj, metav1.CreateOptions{FieldManager: "flunder-driver"})
 	t1f := time.Now()
 	writelog("create", obj.Name, t10, t1f, csvFile, err)
 
@@ -155,9 +156,9 @@ func RunObjLifeCycle(clientset *wardleclient.Clientset, csvFile *os.File, objnam
 	time.Sleep(ttl)
 
 	/* delete the object */
-	delopts := &metav1.DeleteOptions{}
+	delopts := metav1.DeleteOptions{}
 	t20 := time.Now()
-	err = clientset.WardleV1alpha1().Flunders(namespace).Delete(obj.Name, delopts)
+	err = clientset.WardleV1alpha1().Flunders(namespace).Delete(context.Background(), obj.Name, delopts)
 	t2f := time.Now()
 	writelog("delete", obj.Name, t20, t2f, csvFile, err)
 }
@@ -172,7 +173,7 @@ func getClientConfig(kubeconfig string) (restConfig *rest.Config, err error) {
 		return
 	}
 	restConfig.UserAgent = "scaletest driver"
-	glog.V(4).Infof("*rest.Config = %#v", *restConfig)
+	klog.V(4).Infof("*rest.Config = %#v", *restConfig)
 	return
 }
 

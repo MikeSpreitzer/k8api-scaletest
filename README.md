@@ -105,12 +105,11 @@ ReplicaSet.
 
 ### Dependencies
 
-#### New
+#### Technique
 
 Dependencies are managed by go 1.11 modules.  Each piece has its own
 `go.mod` and `go.sum`.
 
-#### Old
+#### Versions
 
-The dependencies are kept in `vendor` and managed by Glide.  Use the
-`-v` switch on `glide update` and `glide install`.
+The pieces that depend on Kubernetes depend on the 1.18 release.
