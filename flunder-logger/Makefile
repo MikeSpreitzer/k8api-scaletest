@@ -4,6 +4,7 @@
 # set DOCKERPFX to identify a Docker $registry/$namespace.
 
 DOCKERPFX=$(LOGNAME)
+gitcommit=$(shell git rev-parse "HEAD^{commit}")$(shell if git_status=$$(git status --porcelain 2>/dev/null) && [ -z "$${git_status}" ]; then true ; else echo "-dirty"; fi)
 
 LOGGER=dockerbuild/flunder-logger
 
@@ -16,4 +17,4 @@ ${LOGGER}: main.go hostaddr.go
 
 publish: ${LOGGER} Dockerfile
 	cp Dockerfile dockerbuild/
-	cd dockerbuild && docker build -t ${DOCKERPFX}/flunder-logger . && docker push ${DOCKERPFX}/flunder-logger
+	cd dockerbuild && docker build -t ${DOCKERPFX}/flunder-logger -t ${DOCKERPFX}/flunder-logger:${gitcommit} . && docker push ${DOCKERPFX}/flunder-logger && docker push ${DOCKERPFX}/flunder-logger:${gitcommit}

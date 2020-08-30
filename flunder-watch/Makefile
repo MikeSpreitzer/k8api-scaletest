@@ -4,6 +4,7 @@
 # set DOCKERPFX to identify a Docker $registry/$namespace.
 
 DOCKERPFX=$(LOGNAME)
+gitcommit=$(shell git rev-parse "HEAD^{commit}")$(shell if git_status=$$(git status --porcelain 2>/dev/null) && [ -z "$${git_status}" ]; then true ; else echo "-dirty"; fi)
 
 WATCH=dockerbuild/flunder-watch
 
@@ -16,4 +17,4 @@ ${WATCH}: main.go hostaddr.go
 
 publish: ${WATCH} Dockerfile
 	cp Dockerfile dockerbuild/
-	cd dockerbuild && docker build -t ${DOCKERPFX}/flunder-watch . && docker push ${DOCKERPFX}/flunder-watch
+	cd dockerbuild && docker build -t ${DOCKERPFX}/flunder-watch -t ${DOCKERPFX}/flunder-watch:${gitcommit} . && docker push ${DOCKERPFX}/flunder-watch && docker push ${DOCKERPFX}/flunder-watch:${gitcommit}
