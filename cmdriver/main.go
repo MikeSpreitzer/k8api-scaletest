@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"math"
 	"math/rand"
+	"net/http"
 	"os"
 	"os/signal"
 	"regexp"
@@ -13,19 +15,16 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
-	"net/http"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/golang/glog"
-
 	kubecorev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	kubeclient "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/flowcontrol"
+	"k8s.io/klog/v2"
 )
 
 const (
@@ -52,13 +51,13 @@ var totErrCount uint32 = 0
 const namespace = "scaletest"
 
 func main() {
-
+	klog.InitFlags(nil)
 	flag.Set("logtostderr", "true")
 	flag.Parse()
 
 	// Start the HTTP server to expose golang prometheus metrics
 	http.Handle("/metrics", promhttp.Handler())
-	glog.Infof("starting HTTP server on port :%s\n", *metricPort)
+	klog.Infof("starting HTTP server on port :%s\n", *metricPort)
 	go http.ListenAndServe(":"+*metricPort, nil)
 
 	if *runID == "" {
@@ -70,7 +69,7 @@ func main() {
 		h, m, _ := now.Clock()
 		*runID = fmt.Sprintf("%02d%02d.%02d%02d.%04d", M, D, h, m, rand.Intn(10000))
 	} else if good, _ := regexp.MatchString("^[-a-zA-Z0-9!@#$%^&()+=][-a-zA-Z0-9!@#$%^&()+=.]*$", *runID); !good {
-		glog.Errorf("runid %q does not match regular expression ^[-a-zA-Z0-9!@#$%%^&()+=][-a-zA-Z0-9!@#$%%^&()+=.]*$\n", *runID)
+		klog.Errorf("runid %q does not match regular expression ^[-a-zA-Z0-9!@#$%%^&()+=][-a-zA-Z0-9!@#$%%^&()+=.]*$\n", *runID)
 		os.Exit(1)
 	}
 
@@ -80,7 +79,7 @@ func main() {
 
 	*dataFilename = strings.Replace(*dataFilename, "{{.RunID}}", *runID, -1)
 	if good, _ := regexp.MatchString("^[-a-zA-Z0-9!@#$%^&()+=./]+$", *dataFilename); !good {
-		glog.Errorf("data filename %q does not match regular expression ^[-a-zA-Z0-9!@#$%%^&()+=./]+$\n", *dataFilename)
+		klog.Errorf("data filename %q does not match regular expression ^[-a-zA-Z0-9!@#$%%^&()+=./]+$\n", *dataFilename)
 		os.Exit(5)
 	}
 
@@ -91,7 +90,7 @@ func main() {
 	parmFileName := *runID + "-driver.parms"
 	parmFile, err := os.Create(parmFileName)
 	if err != nil {
-		glog.Errorf("Failed to create parameter file named %q: %s\n", parmFileName, err)
+		klog.Errorf("Failed to create parameter file named %q: %s\n", parmFileName, err)
 		os.Exit(10)
 	}
 	parmFile.WriteString(fmt.Sprintf("KUBECONFIG=%q\n", *kubeconfigPath))
@@ -102,7 +101,7 @@ func main() {
 	parmFile.WriteString(fmt.Sprintf("RUNID=%q\n", *runID))
 	parmFile.WriteString(fmt.Sprintf("SEED=%d\n", *seed))
 	if err = parmFile.Close(); err != nil {
-		glog.Errorf("Failed to close parameter file named %q: %s\n", parmFileName, err)
+		klog.Errorf("Failed to close parameter file named %q: %s\n", parmFileName, err)
 		os.Exit(11)
 	}
 	fmt.Printf("RunID is %s\n", *runID)
@@ -111,14 +110,14 @@ func main() {
 	/* connect to the API server */
 	config, err := getClientConfig(*kubeconfigPath)
 	if err != nil {
-		glog.Errorf("Unable to get kube client config: %s\n", err)
+		klog.Errorf("Unable to get kube client config: %s\n", err)
 		os.Exit(20)
 	}
 	config.RateLimiter = flowcontrol.NewFakeAlwaysRateLimiter()
 
 	clientset, err := kubeclient.NewForConfig(config)
 	if err != nil {
-		glog.Errorf("Failed to create a clientset: %s\n", err)
+		klog.Errorf("Failed to create a clientset: %s\n", err)
 		os.Exit(21)
 	}
 
@@ -127,13 +126,13 @@ func main() {
 		var eps []string
 		clientsetSrc, eps, err = MultiClientsetSrc(config, clientset, "kubernetes", "default", "TCP", "https", *seed)
 		if err != nil {
-			glog.Error(err)
+			klog.Error(err)
 			os.Exit(22)
 		}
-		glog.Infof("Balancing load among %s\n", eps)
+		klog.Infof("Balancing load among %s\n", eps)
 	} else {
 		clientsetSrc = SingleClientsetSrc(clientset)
-		glog.Infof("Sending requests to %s\n", config.Host)
+		klog.Infof("Sending requests to %s\n", config.Host)
 	}
 
 	/* open the CVS file we are going to write */
@@ -172,7 +171,7 @@ func main() {
 
 	fmt.Printf("DEBUG: waiting for objects to clear\n")
 	wg.Wait()
-	glog.Infof("%d logged errors\n", totErrCount)
+	klog.Infof("%d logged errors\n", totErrCount)
 
 	time.Sleep(time.Duration(*waitBeforeTerminate) * time.Second)
 
@@ -201,7 +200,7 @@ func RunObjLifeCycle(clientsetSrc ClientsetSrc, csvFile *os.File, objname string
 	t10 := time.Now()
 	obj.Annotations[CreateTimestampAnnotation] = t10.Format(CreateTimestampLayout)
 	err = clientsetSrc.WithInterface(func(clientset kubeclient.Interface) error {
-		_, err := clientset.CoreV1().ConfigMaps(namespace).Create(obj)
+		_, err := clientset.CoreV1().ConfigMaps(namespace).Create(context.Background(), obj, metav1.CreateOptions{FieldManager: "cmdriver"})
 		return err
 	})
 	t1f := time.Now()
@@ -214,10 +213,10 @@ func RunObjLifeCycle(clientsetSrc ClientsetSrc, csvFile *os.File, objname string
 	time.Sleep(ttl)
 
 	/* delete the object */
-	delopts := &metav1.DeleteOptions{}
+	delopts := metav1.DeleteOptions{}
 	t20 := time.Now()
 	err = clientsetSrc.WithInterface(func(clientset kubeclient.Interface) error {
-		return clientset.CoreV1().ConfigMaps(namespace).Delete(obj.Name, delopts)
+		return clientset.CoreV1().ConfigMaps(namespace).Delete(context.Background(), obj.Name, delopts)
 	})
 	t2f := time.Now()
 	writelog("delete", obj.Name, t20, t2f, csvFile, err)
@@ -239,7 +238,7 @@ func getClientConfig(kubeconfig string) (restConfig *rest.Config, err error) {
 		return
 	}
 	restConfig.UserAgent = "scaletest driver"
-	glog.V(4).Infof("*rest.Config = %#v", *restConfig)
+	klog.V(4).Infof("*rest.Config = %#v", *restConfig)
 	return
 }
 

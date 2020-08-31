@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"flag"
 	"fmt"
@@ -17,8 +18,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/golang/glog"
-
 	kubecorev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -29,6 +28,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/flowcontrol"
+	"k8s.io/klog/v2"
 )
 
 const (
@@ -58,7 +58,7 @@ var seed = flag.Int64("seed", 0, "seed for random numbers (other than runid) (de
 const namespace = "scaletest"
 
 func main() {
-
+	klog.InitFlags(nil)
 	flag.Set("logtostderr", "true")
 	flag.Parse()
 
@@ -75,7 +75,7 @@ func main() {
 		h, m, _ := now.Clock()
 		*runID = fmt.Sprintf("%02d%02d.%02d%02d.%04d", M, D, h, m, rand.Intn(10000))
 	} else if good, _ := regexp.MatchString("^[-a-zA-Z0-9!@#$%^&()+=][-a-zA-Z0-9!@#$%^&()+=.]*$", *runID); !good {
-		glog.Errorf("runid %q does not match regular expression ^[-a-zA-Z0-9!@#$%%^&()+=][-a-zA-Z0-9!@#$%%^&()+=.]*$\n", *runID)
+		klog.Errorf("runid %q does not match regular expression ^[-a-zA-Z0-9!@#$%%^&()+=][-a-zA-Z0-9!@#$%%^&()+=.]*$\n", *runID)
 		os.Exit(1)
 	}
 
@@ -85,7 +85,7 @@ func main() {
 
 	*dataFilename = strings.Replace(*dataFilename, "{{.RunID}}", *runID, -1)
 	if good, _ := regexp.MatchString("^[-a-zA-Z0-9!@#$%^&()+=./]+$", *dataFilename); !good {
-		glog.Errorf("data filename %q does not match regular expression ^[-a-zA-Z0-9!@#$%%^&()+=./]+$\n", *dataFilename)
+		klog.Errorf("data filename %q does not match regular expression ^[-a-zA-Z0-9!@#$%%^&()+=./]+$\n", *dataFilename)
 		os.Exit(5)
 	}
 
@@ -96,7 +96,7 @@ func main() {
 	/* connect to the API server */
 	config, err := getClientConfig(*kubeconfigPath)
 	if err != nil {
-		glog.Errorf("Unable to get kube client config: %s", err)
+		klog.Errorf("Unable to get kube client config: %s", err)
 		os.Exit(20)
 	}
 	config.RateLimiter = flowcontrol.NewFakeAlwaysRateLimiter()
@@ -104,22 +104,22 @@ func main() {
 	parmFileName := *runID + "-driver.parms"
 	parmFile, err := os.Create(parmFileName)
 	if err != nil {
-		glog.Errorf("Failed to create parameter file named %q: %s\n", parmFileName, err)
+		klog.Errorf("Failed to create parameter file named %q: %s\n", parmFileName, err)
 		os.Exit(10)
 	}
 	myEx, err := os.Executable()
 	if err != nil {
-		glog.Warningf("os.Executable() threw %#+v\n", err)
+		klog.Warningf("os.Executable() threw %#+v\n", err)
 	} else {
 		myExF, err := os.Open(myEx)
 		if err != nil {
-			glog.Warningf("os.Open(%q) threw %#+v\n", err)
+			klog.Warningf("os.Open(%q) threw %#+v\n", err)
 		} else {
 			defer myExF.Close()
 			hasher := sha256.New()
 			_, err = io.Copy(hasher, myExF)
 			if err != nil {
-				glog.Warning("io.Copy threw %#+v\n", err)
+				klog.Warning("io.Copy threw %#+v\n", err)
 			} else {
 				hash := hasher.Sum(nil)
 				parmFile.WriteString(fmt.Sprintf("PROG_SHA256=\"%x\"\n", hash))
@@ -143,7 +143,7 @@ func main() {
 
 	urClientset, err := kubeclient.NewForConfig(config)
 	if err != nil {
-		glog.Errorf("Failed to create a clientset: %s\n", err)
+		klog.Errorf("Failed to create a clientset: %s\n", err)
 		os.Exit(21)
 	}
 
@@ -152,12 +152,12 @@ func main() {
 	if *conns != 1 {
 		endpoints, err = GetEndpoints(urClientset, "kubernetes", "default", "TCP", "https")
 		if err != nil {
-			glog.Error(err)
+			klog.Error(err)
 			os.Exit(22)
 		}
 		if *conns == 0 || *conns > len(endpoints) {
 			if *conns > 0 {
-				glog.Warningf("Only %d endpoints available\n", len(endpoints))
+				klog.Warningf("Only %d endpoints available\n", len(endpoints))
 			}
 			*conns = len(endpoints)
 		} else if *conns < len(endpoints) {
@@ -165,7 +165,7 @@ func main() {
 		}
 		clientsets, err = ClientsetsForEndpoints(config, endpoints)
 		if err != nil {
-			glog.Error(err)
+			klog.Error(err)
 			os.Exit(23)
 		}
 	} else {
@@ -175,10 +175,10 @@ func main() {
 	parmFile.WriteString(fmt.Sprintf("ENDPOINTS=\"%s\"\n", endpoints))
 
 	if err = parmFile.Close(); err != nil {
-		glog.Errorf("Failed to close parameter file named %q: %s\n", parmFileName, err)
+		klog.Errorf("Failed to close parameter file named %q: %s\n", parmFileName, err)
 		os.Exit(11)
 	}
-	glog.Infof("RunID is %s\n", *runID)
+	klog.Infof("RunID is %s\n", *runID)
 	fmt.Printf("Wrote parameter file %q\n", parmFileName)
 
 	/* open the CVS file we are going to write */
@@ -209,12 +209,12 @@ func main() {
 	digits := uint(1 + math.Floor(math.Log10(float64(*n))))
 	totalNameLength := uint(len(*runID)) + 1 + digits + *namePadLength
 	if totalNameLength > 253 {
-		glog.Errorf("Total name length %d is too long (limit is 253)\n", totalNameLength)
+		klog.Errorf("Total name length %d is too long (limit is 253)\n", totalNameLength)
 		os.Exit(17)
 	}
 	namefmt := fmt.Sprintf("%%s-%%0%dd", digits+*namePadLength)
 	t0 := time.Now()
-	glog.V(2).Infof("t0 = %s\n", t0)
+	klog.V(2).Infof("t0 = %s\n", t0)
 	var wg sync.WaitGroup
 	for i := uint64(0); i < *threads; i++ {
 		wg.Add(1)
@@ -230,14 +230,14 @@ func main() {
 			RunThread(clientsets[thd%uint64(*conns)], csvFile, namefmt, *runID, createValue, deltaFmt, t0, *hackCreate, *updates, numHere, lag, thd+1, *threads, opPeriod)
 		}(i)
 	}
-	glog.V(2).Info("waiting for threads to finish\n")
+	klog.V(2).Info("waiting for threads to finish\n")
 	wg.Wait()
 	tf := time.Now()
 	dt := tf.Sub(t0)
 	dts := dt.Seconds()
 	rate := float64(2+*updates) * float64(*n) / dts
-	glog.Infof("%d object lifecycles in %g seconds = %g writes/sec, with %d errors on create, %d on update, and %d on delete\n", *n, dts, rate, createErrors, updateErrors, deleteErrors)
-	glog.Infof("Protobuf length of a created object = %d, protobuf length of an updated object = %d\n", createdObjLen, updatedObjLen)
+	klog.Infof("%d object lifecycles in %g seconds = %g writes/sec, with %d errors on create, %d on update, and %d on delete\n", *n, dts, rate, createErrors, updateErrors, deleteErrors)
+	klog.Infof("Protobuf length of a created object = %d, protobuf length of an updated object = %d\n", createdObjLen, updatedObjLen)
 }
 
 var createErrors, updateErrors, deleteErrors int64
@@ -252,7 +252,7 @@ var createdObjLen, updatedObjLen int
 // thd+2*stride, and so on.
 
 func RunThread(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID, createValue, deltaFmt string, tbase time.Time, hackCreate bool, updates, n, lag, thd, stride uint64, opPeriod float64) {
-	glog.V(3).Infof("Thread %d creating %d objects with lag %d, stride %d, clientset %p\n", thd, n, lag, stride, clientset)
+	klog.V(3).Infof("Thread %d creating %d objects with lag %d, stride %d, clientset %p\n", thd, n, lag, stride, clientset)
 	var iByPhase []uint64 = make([]uint64, 2+updates)
 	var iSum uint64
 	lastPhase := 1 + updates
@@ -262,16 +262,16 @@ func RunThread(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID
 		now := time.Now()
 		if targt.After(now) {
 			gap := targt.Sub(now)
-			glog.V(4).Infof("For %#v in thread %d, target time is %s, now is %s; sleeping %s\n", iByPhase, thd, targt, now, gap)
+			klog.V(4).Infof("For %#v in thread %d, target time is %s, now is %s; sleeping %s\n", iByPhase, thd, targt, now, gap)
 			time.Sleep(gap)
 		} else {
-			glog.V(4).Infof("For %#v in thread %d, target time is %s, now is %s; no sleep\n", iByPhase, thd, targt, now)
+			klog.V(4).Infof("For %#v in thread %d, target time is %s, now is %s; no sleep\n", iByPhase, thd, targt, now)
 		}
 		phase := lastPhase
 		for ; phase > 0 && iByPhase[phase-1] < iByPhase[phase]+lag && iByPhase[phase-1] < n; phase-- {
 		}
 		if iByPhase[phase] == 0 {
-			glog.V(3).Infof("Thread %d doing first at phase %d\n", thd, phase)
+			klog.V(3).Infof("Thread %d doing first at phase %d\n", thd, phase)
 		}
 		i := iByPhase[phase]*stride + thd
 		iByPhase[phase] += 1
@@ -304,21 +304,22 @@ func RunThread(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID
 					//		&metav1.ListOptions{TimeoutSeconds: &toSecs},
 					//		scheme.ParameterCodec).
 					Body(obj).
-					Do().
+					Do(context.Background()).
 					Into(retObj)
 			} else {
-				retObj, err = clientset.CoreV1().ConfigMaps(namespace).Create(obj)
+				retObj, err = clientset.CoreV1().ConfigMaps(namespace).Create(context.Background(), obj, metav1.CreateOptions{FieldManager: "cmdriverclosed"})
 			}
 			tif := time.Now()
 			writelog("create", obj.Name, ti0, tif, csvFile, err)
 			if err != nil {
 				atomic.AddInt64(&createErrors, 1)
+				klog.V(6).Infof("Create failed: %#+v\n", err)
 			} else if i == 1 {
 				var buf []byte
 				var err error
 				buf, err = retObj.Marshal()
 				if err != nil {
-					glog.Warningf("Marshaling returned object %#+v threw %#+v\n", retObj, err)
+					klog.Warningf("Marshaling returned object %#+v threw %#+v\n", retObj, err)
 				} else {
 					createdObjLen = len(buf)
 				}
@@ -326,7 +327,7 @@ func RunThread(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID
 		} else if phase < lastPhase {
 			ti0s := ti0.Format(CreateTimestampLayout)
 			delta := fmt.Sprintf(deltaFmt, phase, ti0s)
-			retObj, err := clientset.CoreV1().ConfigMaps(namespace).Patch(objname, types.StrategicMergePatchType, []byte(delta))
+			retObj, err := clientset.CoreV1().ConfigMaps(namespace).Patch(context.Background(), objname, types.StrategicMergePatchType, []byte(delta), metav1.PatchOptions{FieldManager: "cmdriverclosed"})
 			tif := time.Now()
 			writelog("update", objname, ti0, tif, csvFile, err)
 			if err != nil {
@@ -336,14 +337,14 @@ func RunThread(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID
 				var err error
 				buf, err = retObj.Marshal()
 				if err != nil {
-					glog.Warningf("Marshaling returned object %#+v threw %#+v\n", retObj, err)
+					klog.Warningf("Marshaling returned object %#+v threw %#+v\n", retObj, err)
 				} else {
 					updatedObjLen = len(buf)
 				}
 			}
 		} else {
-			delopts := &metav1.DeleteOptions{}
-			err := clientset.CoreV1().ConfigMaps(namespace).Delete(objname, delopts)
+			delopts := metav1.DeleteOptions{}
+			err := clientset.CoreV1().ConfigMaps(namespace).Delete(context.Background(), objname, delopts)
 			tif := time.Now()
 			writelog("delete", objname, ti0, tif, csvFile, err)
 			if err != nil {
@@ -363,7 +364,7 @@ func getClientConfig(kubeconfig string) (restConfig *rest.Config, err error) {
 		return
 	}
 	restConfig.UserAgent = "scaletest driver"
-	glog.V(4).Infof("*rest.Config = %#v", *restConfig)
+	klog.V(4).Infof("*rest.Config = %#v", *restConfig)
 	return
 }
 
