@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"regexp"
@@ -57,8 +58,8 @@ func main() {
 
 	// Start the HTTP server to expose golang prometheus metrics
 	http.Handle("/metrics", promhttp.Handler())
-	klog.Infof("starting HTTP server on port :%s\n", *metricPort)
-	go http.ListenAndServe(":"+*metricPort, nil)
+	klog.Infof("starting HTTP server on port :%s", *metricPort)
+	go func() { klog.Fatal(http.ListenAndServe(":"+*metricPort, nil)) }()
 
 	if *runID == "" {
 		now := time.Now()
@@ -69,7 +70,7 @@ func main() {
 		h, m, _ := now.Clock()
 		*runID = fmt.Sprintf("%02d%02d.%02d%02d.%04d", M, D, h, m, rand.Intn(10000))
 	} else if good, _ := regexp.MatchString("^[-a-zA-Z0-9!@#$%^&()+=][-a-zA-Z0-9!@#$%^&()+=.]*$", *runID); !good {
-		klog.Errorf("runid %q does not match regular expression ^[-a-zA-Z0-9!@#$%%^&()+=][-a-zA-Z0-9!@#$%%^&()+=.]*$\n", *runID)
+		klog.Errorf("runid %q does not match regular expression ^[-a-zA-Z0-9!@#$%%^&()+=][-a-zA-Z0-9!@#$%%^&()+=.]*$", *runID)
 		os.Exit(1)
 	}
 
@@ -79,7 +80,7 @@ func main() {
 
 	*dataFilename = strings.Replace(*dataFilename, "{{.RunID}}", *runID, -1)
 	if good, _ := regexp.MatchString("^[-a-zA-Z0-9!@#$%^&()+=./]+$", *dataFilename); !good {
-		klog.Errorf("data filename %q does not match regular expression ^[-a-zA-Z0-9!@#$%%^&()+=./]+$\n", *dataFilename)
+		klog.Errorf("data filename %q does not match regular expression ^[-a-zA-Z0-9!@#$%%^&()+=./]+$", *dataFilename)
 		os.Exit(5)
 	}
 
@@ -90,7 +91,7 @@ func main() {
 	parmFileName := *runID + "-driver.parms"
 	parmFile, err := os.Create(parmFileName)
 	if err != nil {
-		klog.Errorf("Failed to create parameter file named %q: %s\n", parmFileName, err)
+		klog.Errorf("Failed to create parameter file named %q: %s", parmFileName, err)
 		os.Exit(10)
 	}
 	parmFile.WriteString(fmt.Sprintf("KUBECONFIG=%q\n", *kubeconfigPath))
@@ -101,23 +102,23 @@ func main() {
 	parmFile.WriteString(fmt.Sprintf("RUNID=%q\n", *runID))
 	parmFile.WriteString(fmt.Sprintf("SEED=%d\n", *seed))
 	if err = parmFile.Close(); err != nil {
-		klog.Errorf("Failed to close parameter file named %q: %s\n", parmFileName, err)
+		klog.Errorf("Failed to close parameter file named %q: %s", parmFileName, err)
 		os.Exit(11)
 	}
-	fmt.Printf("RunID is %s\n", *runID)
-	fmt.Printf("Wrote parameter file %q\n", parmFileName)
+	klog.Infof("RunID is %s", *runID)
+	klog.Infof("Wrote parameter file %q", parmFileName)
 
 	/* connect to the API server */
 	config, err := getClientConfig(*kubeconfigPath)
 	if err != nil {
-		klog.Errorf("Unable to get kube client config: %s\n", err)
+		klog.Errorf("Unable to get kube client config: %s", err)
 		os.Exit(20)
 	}
 	config.RateLimiter = flowcontrol.NewFakeAlwaysRateLimiter()
 
 	clientset, err := kubeclient.NewForConfig(config)
 	if err != nil {
-		klog.Errorf("Failed to create a clientset: %s\n", err)
+		klog.Errorf("Failed to create a clientset: %s", err)
 		os.Exit(21)
 	}
 
@@ -129,10 +130,10 @@ func main() {
 			klog.Error(err)
 			os.Exit(22)
 		}
-		klog.Infof("Balancing load among %s\n", eps)
+		klog.Infof("Balancing load among %s", eps)
 	} else {
 		clientsetSrc = SingleClientsetSrc(clientset)
-		klog.Infof("Sending requests to %s\n", config.Host)
+		klog.Infof("Sending requests to %s", config.Host)
 	}
 
 	/* open the CVS file we are going to write */
@@ -143,10 +144,10 @@ func main() {
 
 	ttl := time.Duration(float64(time.Second) * float64(*maxpop) / (*lambda))
 
-	fmt.Printf("DEBUG: Creating %d objects\n", *n)
-	fmt.Printf("DEBUG: LAMBDA = %g/sec\n", *lambda)
-	fmt.Printf("DEBUG: maxpop = %d\n", *maxpop)
-	fmt.Printf("DEBUG: OBJ TTL = %v\n", ttl)
+	klog.Infof("Creating %d objects", *n)
+	klog.Infof("LAMBDA = %g/sec", *lambda)
+	klog.Infof("maxpop = %d", *maxpop)
+	klog.Infof("OBJ TTL = %v", ttl)
 	var wg sync.WaitGroup
 	digits := int(1 + math.Floor(math.Log10(float64(*n))))
 	namefmt := fmt.Sprintf("%%s-%%0%dd", digits)
@@ -169,9 +170,9 @@ func main() {
 		}(i)
 	}
 
-	fmt.Printf("DEBUG: waiting for objects to clear\n")
+	klog.Info("DEBUG: waiting for objects to clear")
 	wg.Wait()
-	klog.Infof("%d logged errors\n", totErrCount)
+	klog.Infof("%d logged errors", totErrCount)
 
 	time.Sleep(time.Duration(*waitBeforeTerminate) * time.Second)
 
