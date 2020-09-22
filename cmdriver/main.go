@@ -46,6 +46,7 @@ var seed = flag.Int64("seed", 0, "seed for random numbers (other than runid) (de
 var clientLB = flag.Bool("clientlb", false, "Load balance in this client")
 var metricPort = flag.String("metricport", "9376", "Port to expose prometheus metrics")
 var waitBeforeTerminate = flag.Int64("waitBeforeTerminate", 15, "Time in seconds to wait before terminate the program to have the metrics scraped by Prometheus")
+var dataLen = flag.Int("datalen", 2000, "Length of data value in a ConfigMap object")
 
 var totErrCount uint32 = 0
 
@@ -98,6 +99,7 @@ func main() {
 	parmFile.WriteString(fmt.Sprintf("LAMBDA=%G\n", *lambda))
 	parmFile.WriteString(fmt.Sprintf("N=%d\n", *n))
 	parmFile.WriteString(fmt.Sprintf("MAXPOP=%d\n", *maxpop))
+	parmFile.WriteString(fmt.Sprintf("DATALEN=%d\n", *dataLen))
 	parmFile.WriteString(fmt.Sprintf("DATEFILENAME=%q\n", *dataFilename))
 	parmFile.WriteString(fmt.Sprintf("RUNID=%q\n", *runID))
 	parmFile.WriteString(fmt.Sprintf("SEED=%d\n", *seed))
@@ -147,10 +149,13 @@ func main() {
 	klog.Infof("Creating %d objects", *n)
 	klog.Infof("LAMBDA = %g/sec", *lambda)
 	klog.Infof("maxpop = %d", *maxpop)
+	klog.Infof("dataLen = %d", *dataLen)
 	klog.Infof("OBJ TTL = %v", ttl)
 	var wg sync.WaitGroup
 	digits := int(1 + math.Floor(math.Log10(float64(*n))))
 	namefmt := fmt.Sprintf("%%s-%%0%dd", digits)
+	valueFmt := fmt.Sprintf("%%0%dd", *dataLen)
+	value0 := fmt.Sprintf(valueFmt, 0)
 	t0 := time.Now()
 	nextOffset := 0.0
 	for i := 1; i <= *n; i++ {
@@ -166,7 +171,7 @@ func main() {
 		go func(objnum int) {
 			defer wg.Done()
 			objname := fmt.Sprintf(namefmt, *runID, objnum)
-			RunObjLifeCycle(clientsetSrc, csvFile, objname, ttl)
+			RunObjLifeCycle(clientsetSrc, csvFile, objname, value0, ttl)
 		}(i)
 	}
 
@@ -184,7 +189,7 @@ func main() {
 /* simulate the lifecycle of a single object   */
 /* =========================================== */
 
-func RunObjLifeCycle(clientsetSrc ClientsetSrc, csvFile *os.File, objname string, ttl time.Duration) {
+func RunObjLifeCycle(clientsetSrc ClientsetSrc, csvFile *os.File, objname string, value0 string, ttl time.Duration) {
 	var err error
 	var locErrCount uint32
 
@@ -196,7 +201,7 @@ func RunObjLifeCycle(clientsetSrc ClientsetSrc, csvFile *os.File, objname string
 			Labels:      map[string]string{"purpose": "scaletest"},
 			Annotations: make(map[string]string, 1),
 		},
-		Data: map[string]string{"foo": "bar"},
+		Data: map[string]string{"key1": value0},
 	}
 	t10 := time.Now()
 	obj.Annotations[CreateTimestampAnnotation] = t10.Format(CreateTimestampLayout)
