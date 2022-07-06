@@ -6,3 +6,4 @@ dockerbuild
 *-resources.*.json
 *-pod-*.yaml
 *.zip
+.DS_Store
