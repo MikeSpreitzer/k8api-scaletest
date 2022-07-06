@@ -9,13 +9,11 @@ import (
 	"math"
 	"math/rand"
 	"os"
-	"os/signal"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	kubecorev1 "k8s.io/api/core/v1"
@@ -54,6 +52,7 @@ var updates = flag.Uint64("updates", 1, "number of updates in one object's lifec
 var dataFilename = flag.String("datafile", "{{.RunID}}-driver.csv", "Name of CSV file to create")
 var runID = flag.String("runid", "", "unique ID of this run (default is randomly generated)")
 var seed = flag.Int64("seed", 0, "seed for random numbers (other than runid) (default is based on time)")
+var createOnly = flag.Bool("create-only", false, "eschew deletions")
 
 const namespace = "scaletest"
 
@@ -140,6 +139,7 @@ func main() {
 	parmFile.WriteString(fmt.Sprintf("DATAFILENAME=%q\n", *dataFilename))
 	parmFile.WriteString(fmt.Sprintf("RUNID=%q\n", *runID))
 	parmFile.WriteString(fmt.Sprintf("SEED=%d\n", *seed))
+	parmFile.WriteString(fmt.Sprintf("CREATE_ONLY=%v\n", *createOnly))
 
 	urClientset, err := kubeclient.NewForConfig(config)
 	if err != nil {
@@ -200,6 +200,7 @@ func main() {
 	fmt.Printf("DEBUG: HackCreate = %v\n", *hackCreate)
 	fmt.Printf("DEBUG: CreateValueLength = %d\n", *createValueLength)
 	fmt.Printf("DEBUG: UpdateValueLength = %d\n", *updateValueLength)
+	fmt.Printf("DEBUG: CreateOnly = %v\n", *createOnly)
 	createValue := ""
 	if *createValueLength > 0 {
 		createValue = strings.Repeat("X", *createValueLength)
@@ -227,7 +228,7 @@ func main() {
 				lag = 1
 			}
 			numHere := (*n + thd) / (*threads)
-			RunThread(clientsets[thd%uint64(*conns)], csvFile, namefmt, *runID, createValue, deltaFmt, t0, *hackCreate, *updates, numHere, lag, thd+1, *threads, opPeriod)
+			RunThread(clientsets[thd%uint64(*conns)], csvFile, namefmt, *runID, createValue, deltaFmt, t0, *hackCreate, *updates, numHere, lag, thd+1, *threads, opPeriod, *createOnly)
 		}(i)
 	}
 	klog.V(2).Info("waiting for threads to finish\n")
@@ -235,7 +236,11 @@ func main() {
 	tf := time.Now()
 	dt := tf.Sub(t0)
 	dts := dt.Seconds()
-	rate := float64(2+*updates) * float64(*n) / dts
+	var nDel uint64 = 1
+	if *createOnly {
+		nDel = 0
+	}
+	rate := float64(1+nDel+*updates) * float64(*n) / dts
 	klog.Infof("%d object lifecycles in %g seconds = %g writes/sec, with %d errors on create, %d on update, and %d on delete\n", *n, dts, rate, createErrors, updateErrors, deleteErrors)
 	klog.Infof("Protobuf length of a created object = %d, protobuf length of an updated object = %d\n", createdObjLen, updatedObjLen)
 }
@@ -251,11 +256,15 @@ var createdObjLen, updatedObjLen int
 // lag between phases.  The objects are numbered thd, thd+stride,
 // thd+2*stride, and so on.
 
-func RunThread(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID, createValue, deltaFmt string, tbase time.Time, hackCreate bool, updates, n, lag, thd, stride uint64, opPeriod float64) {
-	klog.V(3).Infof("Thread %d creating %d objects with lag %d, stride %d, clientset %p\n", thd, n, lag, stride, clientset)
+func RunThread(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID, createValue, deltaFmt string, tbase time.Time, hackCreate bool, updates, n, lag, thd, stride uint64, opPeriod float64, createOnly bool) {
+	klog.V(3).Infof("Thread %d creating %d objects with lag %d, stride %d, clientset %p, createOnly=%v\n", thd, n, lag, stride, clientset, createOnly)
 	var iByPhase []uint64 = make([]uint64, 2+updates)
 	var iSum uint64
-	lastPhase := 1 + updates
+	deletePhase := 1 + updates
+	lastPhase := deletePhase
+	if createOnly {
+		lastPhase = deletePhase - 1
+	}
 	for iByPhase[lastPhase] < n {
 		dt := float64(iSum*stride+thd) * opPeriod * float64(time.Second)
 		targt := tbase.Add(time.Duration(dt))
@@ -324,7 +333,7 @@ func RunThread(clientset *kubeclient.Clientset, csvFile *os.File, namefmt, runID
 					createdObjLen = len(buf)
 				}
 			}
-		} else if phase < lastPhase {
+		} else if phase < deletePhase {
 			ti0s := ti0.Format(CreateTimestampLayout)
 			delta := fmt.Sprintf(deltaFmt, phase, ti0s)
 			retObj, err := clientset.CoreV1().ConfigMaps(namespace).Patch(context.Background(), objname, types.StrategicMergePatchType, []byte(delta), metav1.PatchOptions{FieldManager: "cmdriverclosed"})
@@ -366,28 +375,6 @@ func getClientConfig(kubeconfig string) (restConfig *rest.Config, err error) {
 	restConfig.UserAgent = "scaletest driver"
 	klog.V(4).Infof("*rest.Config = %#v", *restConfig)
 	return
-}
-
-func setupSignalHandler() (stopCh <-chan struct{}) {
-	stop := make(chan struct{})
-	c := make(chan os.Signal, 2)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-c
-		close(stop)
-		<-c
-		os.Exit(1) // second signal. Exit directly.
-	}()
-
-	return stop
-}
-
-func nextDelta(randGen *rand.Rand, rateParameter float64) float64 {
-	nextDeltaSeconds := randGen.ExpFloat64() / rateParameter
-	if nextDeltaSeconds > 300 {
-		nextDeltaSeconds = 300
-	}
-	return nextDeltaSeconds
 }
 
 func formatTime(t time.Time) string {

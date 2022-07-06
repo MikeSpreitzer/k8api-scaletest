@@ -1,7 +1,7 @@
 package main
 
 import (
-       "context"
+	"context"
 	"fmt"
 	"strings"
 
@@ -17,7 +17,7 @@ import (
 func GetEndpoints(clientset *kubeclient.Clientset, serviceName, serviceNS, protocol, scheme string) ([]string, error) {
 	eps, err := clientset.CoreV1().Endpoints(serviceNS).Get(context.Background(), serviceName, metav1.GetOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("Failed to fetch Endpoints named %q in namespace %q: %s", serviceName, serviceNS, err)
+		return nil, fmt.Errorf("failed to fetch Endpoints named %q in namespace %q: %s", serviceName, serviceNS, err)
 	}
 	ans := make([]string, 0)
 	for _, es := range eps.Subsets {
@@ -50,7 +50,7 @@ func ClientsetsForEndpoints(restConfig *rest.Config, endpoints []string) (ans []
 		config.Host = ep
 		ans[idx], err = kubeclient.NewForConfig(config)
 		if err != nil {
-			return nil, fmt.Errorf("Failure making clientset for host %s", config.Host)
+			return nil, fmt.Errorf("failure making clientset for host %s", config.Host)
 		}
 	}
 	return
